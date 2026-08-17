@@ -1,0 +1,29 @@
+# Runtime dependencies, pinned (CLAUDE.md: "Pin dependencies").
+# Resolved against PyPI on 2026-08-15.
+
+# --- API ---
+fastapi==0.141.1
+uvicorn[standard]==0.52.3
+pydantic==2.13.4
+python-multipart==0.0.32          # multipart/form-data PDF upload
+
+# --- Persistence ---
+alembic==1.19.1                   # migrations from day one; pulls SQLAlchemy,
+                                  # used only to run raw DDL (no ORM layer)
+sqlite-vec==0.1.9                 # vec0 virtual table, one embedding per paper
+
+# --- Ingest ---
+httpx==0.28.1                     # arXiv Atom API + PDF download + OpenRouter
+pymupdf==1.28.2                   # full-text extraction, page count, outline
+
+# --- Embeddings (LOCAL only — CLAUDE.md forbids embedding API calls) ---
+sentence-transformers==5.7.0
+
+# --- Queue ---
+# arq over Celery/RQ: it is asyncio-native, so the worker shares one event loop
+# (and one httpx client) with the same async ingest code the API imports; Celery
+# would force a sync/async bridge for every LLM and download call. It is also
+# ~1 dependency deep and needs no result backend. See worker.py for the full
+# rationale.
+arq==0.28.0
+redis[hiredis]==5.3.1              # arq 0.28 requires redis<6; do not bump alone

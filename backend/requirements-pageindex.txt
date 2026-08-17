@@ -1,0 +1,25 @@
+# Optional: the open-source PageIndex tree builder (CLAUDE.md ingest step
+# "extraction → PageIndex tree → ...").
+#
+# Why this is a separate file rather than a line in requirements.txt:
+#
+#   * The PyPI release (`pageindex==0.2.8`) ships the *cloud* SDK surface; the
+#     local, vectorless tree builder we want (`page_index` / classic mode) is
+#     the git version, which also drags litellm + openai-agents + pypdfium2.
+#   * Nothing in Phase 1 breaks without it: `TREE_INDEXER=auto` falls back to
+#     the built-in PyMuPDF outline/heading indexer, and every consumer talks to
+#     our own `TreeIndexer` interface (services/tree_indexer.py), not to
+#     PageIndex types.
+#
+# Enable it with:
+#
+#   pip install -r requirements-pageindex.txt
+#   # then set TREE_INDEXER=pageindex (or leave it at auto) in .env
+#
+# Its LLM calls are routed through OpenRouter, not OpenAI: the adapter exports
+# OPENAI_BASE_URL=$OPENROUTER_BASE_URL / OPENAI_API_KEY=$OPENROUTER_API_KEY and
+# passes the model as `openai/$MODEL_INGEST` so PageIndex stays on the OpenAI
+# SDK path (its litellm path would ignore the base URL). See
+# services/tree_indexer.py::PageIndexTreeIndexer.
+
+pageindex @ git+https://github.com/VectifyAI/PageIndex.git@08a912c69ce7d3f39541df7f360648f94ce6e234
