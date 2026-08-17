@@ -216,3 +216,13 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- Mouseion ---------------------------------------------------------------
+# Content-addressed PDFs, PageIndex trees, and the SQLite DB. Never committed.
+/data/
+# Local sentence-transformers / HuggingFace cache when running outside docker.
+.hf-cache/
+# pytest/coverage
+.pytest_cache/
+.coverage
+htmlcov/

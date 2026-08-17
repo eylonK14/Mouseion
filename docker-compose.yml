@@ -1,0 +1,105 @@
+# Mouseion — one compose file runs everything (CLAUDE.md: "One
+# docker-compose.yml at root runs everything").
+#
+# Services:
+#   redis    — arq's broker (see backend/src/mouseion/worker.py for why arq)
+#   migrate  — runs `alembic upgrade head` once, then exits; api and worker
+#              both wait for it so neither can race the schema into existence
+#   api      — FastAPI: ingest endpoints + the Phase 1 list view
+#   worker   — arq worker running the ingest pipeline
+#   open-webui — stock container, chat surface only (CLAUDE.md service 3).
+#              Behind the `webui` profile: it is not needed until the Phase 3
+#              pipes exist, so `make up` stays lean. Start it with
+#              `docker compose --profile webui up -d`.
+
+name: mouseion
+
+x-backend: &backend
+  build:
+    context: ./backend
+    dockerfile: Dockerfile
+  env_file: [.env]
+  environment:
+    DATA_DIR: /app/data
+    DB_PATH: /app/data/library.db
+    FRONTEND_DIR: /app/frontend
+    REDIS_URL: redis://redis:6379/0
+    # sentence-transformers caches the model here; the named volume below
+    # keeps it off the critical path after the first run.
+    HF_HOME: /app/.hf-cache
+  volumes:
+    - ./data:/app/data
+    - ./frontend:/app/frontend:ro
+    - hf-cache:/app/.hf-cache
+
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  migrate:
+    <<: *backend
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+
+  api:
+    <<: *backend
+    command:
+      ["uvicorn", "mouseion.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      # No curl in the slim image; python is always present.
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health',timeout=5).status==200 else 1)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+  worker:
+    <<: *backend
+    command: ["arq", "mouseion.worker.WorkerSettings"]
+    depends_on:
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    profiles: ["webui"]
+    ports:
+      - "${WEBUI_PORT:-3000}:8080"
+    volumes:
+      - open-webui:/app/backend/data
+      # Phase 3+ pipes are mounted read-only; empty in Phase 1.
+      - ./pipes:/app/backend/data/pipelines:ro
+    environment:
+      WEBUI_AUTH: "false"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  hf-cache:
+  open-webui:

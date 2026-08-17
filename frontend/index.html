@@ -1,0 +1,210 @@
+<!doctype html>
+<!--
+  Mouseion — Phase 1 list view.
+
+  Deliberately ugly-but-functional: one file, no build step, no framework.
+  Phase 2 replaces this directory with the real UI (topic tree, search, paper
+  detail, reading workflow). Nothing else in the stack imports from here — the
+  backend just serves this directory as static files.
+-->
+<html lang="en" class="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mouseion</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      /* Open WebUI-ish palette, also the fallback when the CDN is unreachable. */
+      :root { color-scheme: dark; }
+      body { background: #0d0d0d; color: #ececec; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+      .panel { background: #171717; border: 1px solid #2a2a2a; border-radius: 10px; }
+      input, select, button { background: #1f1f1f; color: #ececec; border: 1px solid #333; border-radius: 6px; padding: 6px 10px; }
+      button { cursor: pointer; }
+      button:hover { background: #2a2a2a; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #262626; vertical-align: top; font-size: 14px; }
+      th { color: #9a9a9a; font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+      .chip { display: inline-block; background: #1e293b; color: #93c5fd; border-radius: 999px; padding: 1px 8px; font-size: 11px; margin: 1px 2px 1px 0; }
+      .muted { color: #8a8a8a; }
+      .err { color: #f87171; }
+      .ok { color: #4ade80; }
+    </style>
+  </head>
+
+  <body class="p-6">
+    <main class="max-w-6xl mx-auto space-y-6">
+      <header class="flex items-baseline justify-between">
+        <h1 class="text-2xl font-semibold">Mouseion</h1>
+        <span class="muted text-xs">Phase 1 — bare list view</span>
+      </header>
+
+      <!-- Token: kept in localStorage and sent as a bearer header on every
+           /api call. The page itself is public because a browser cannot attach
+           a header to a top-level navigation. -->
+      <section class="panel p-4">
+        <label class="block text-xs muted mb-2">API token</label>
+        <div class="flex gap-2">
+          <input id="token" type="password" class="flex-1" placeholder="API_TOKEN from your .env" />
+          <button id="save-token">Save</button>
+        </div>
+        <p id="token-note" class="muted text-xs mt-2"></p>
+      </section>
+
+      <section class="panel p-4">
+        <h2 class="text-sm font-semibold mb-3">Add a paper</h2>
+        <form id="ingest-form" class="grid gap-3 sm:grid-cols-[1fr_auto]">
+          <input id="file" type="file" accept="application/pdf" />
+          <span class="muted text-xs self-center">PDF upload</span>
+          <input id="url" type="url" placeholder="https://arxiv.org/abs/1706.03762" />
+          <span class="muted text-xs self-center">or a URL</span>
+          <button type="submit" class="sm:col-span-2">Ingest</button>
+        </form>
+        <div id="jobs" class="mt-4 space-y-1 text-sm"></div>
+      </section>
+
+      <section class="panel p-4">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-sm font-semibold">Papers (<span id="count">0</span>)</h2>
+          <button id="refresh">Refresh</button>
+        </div>
+        <div class="overflow-x-auto">
+          <table>
+            <thead>
+              <tr>
+                <th>Title</th><th>Authors</th><th>Year</th>
+                <th>Topics</th><th>Status</th><th>Summary</th>
+              </tr>
+            </thead>
+            <tbody id="rows">
+              <tr><td colspan="6" class="muted">Nothing yet.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const tokenKey = "mouseion.token";
+      let token = localStorage.getItem(tokenKey) || "";
+      $("token").value = token;
+
+      function noteToken(msg, cls) {
+        $("token-note").className = "text-xs mt-2 " + (cls || "muted");
+        $("token-note").textContent = msg;
+      }
+      noteToken(token ? "Token loaded from this browser." : "No token saved yet.");
+
+      $("save-token").onclick = () => {
+        token = $("token").value.trim();
+        localStorage.setItem(tokenKey, token);
+        noteToken("Saved.", "ok");
+        loadPapers();
+      };
+
+      async function api(path, options = {}) {
+        const headers = Object.assign({}, options.headers || {}, {
+          Authorization: "Bearer " + token,
+        });
+        const res = await fetch(path, Object.assign({}, options, { headers }));
+        if (!res.ok) {
+          const body = await res.text();
+          throw new Error(res.status + " " + body.slice(0, 300));
+        }
+        return res.json();
+      }
+
+      const escapeHtml = (s) =>
+        String(s ?? "").replace(/[&<>"']/g, (c) =>
+          ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]
+        );
+
+      async function loadPapers() {
+        try {
+          const data = await api("/api/papers?limit=200");
+          $("count").textContent = data.total;
+          $("rows").innerHTML =
+            data.items
+              .map(
+                (p) => `
+            <tr>
+              <td>${escapeHtml(p.title || "(untitled)")}
+                  ${p.source_url ? `<div class="muted text-xs"><a href="${escapeHtml(p.source_url)}" target="_blank" rel="noreferrer noopener">source</a></div>` : ""}</td>
+              <td class="muted">${escapeHtml((p.authors || []).join(", "))}</td>
+              <td>${p.year ?? ""}</td>
+              <td>${(p.topics || []).map((t) => `<span class="chip">${escapeHtml(t.name)}</span>`).join("")}</td>
+              <td>${escapeHtml(p.status)}</td>
+              <td class="muted">${escapeHtml(p.summary_short || "")}</td>
+            </tr>`
+              )
+              .join("") || `<tr><td colspan="6" class="muted">Nothing yet.</td></tr>`;
+        } catch (err) {
+          $("rows").innerHTML = `<tr><td colspan="6" class="err">${escapeHtml(err.message)}</td></tr>`;
+        }
+      }
+
+      // Poll a job until it reaches a terminal state.
+      function watchJob(jobId, label) {
+        const line = document.createElement("div");
+        line.textContent = `${label}: queued…`;
+        $("jobs").prepend(line);
+
+        const tick = async () => {
+          try {
+            const job = await api(`/api/jobs/${jobId}`);
+            const steps = (job.completed_steps || []).join(" → ") || "—";
+            if (job.state === "done") {
+              line.innerHTML = `<span class="ok">${escapeHtml(label)}: done</span>` +
+                (job.duplicate ? ` <span class="muted">(duplicate of paper ${job.paper_id})</span>` : "") +
+                ` <span class="muted">[${escapeHtml(steps)}]</span>`;
+              loadPapers();
+              return;
+            }
+            if (job.state === "failed") {
+              line.innerHTML = `<span class="err">${escapeHtml(label)}: failed — ${escapeHtml(job.error || "")}</span>`;
+              return;
+            }
+            line.innerHTML = `${escapeHtml(label)}: <b>${escapeHtml(job.state)}</b> <span class="muted">[${escapeHtml(steps)}]</span>`;
+            setTimeout(tick, 1500);
+          } catch (err) {
+            line.innerHTML = `<span class="err">${escapeHtml(label)}: ${escapeHtml(err.message)}</span>`;
+          }
+        };
+        tick();
+      }
+
+      $("ingest-form").onsubmit = async (event) => {
+        event.preventDefault();
+        const file = $("file").files[0];
+        const url = $("url").value.trim();
+        if (!file && !url) return;
+
+        try {
+          let accepted;
+          if (file) {
+            const form = new FormData();
+            form.append("file", file);
+            accepted = await api("/api/papers", { method: "POST", body: form });
+          } else {
+            accepted = await api("/api/papers", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ url }),
+            });
+          }
+          watchJob(accepted.job_id, file ? file.name : url);
+          $("file").value = "";
+          $("url").value = "";
+        } catch (err) {
+          const line = document.createElement("div");
+          line.className = "err";
+          line.textContent = err.message;
+          $("jobs").prepend(line);
+        }
+      };
+
+      $("refresh").onclick = loadPapers;
+      loadPapers();
+    </script>
+  </body>
+</html>
