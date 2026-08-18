@@ -1,0 +1,54 @@
+{# Notes for one paper. Each editor autosaves 800ms after typing stops; the
+   response replaces only the timestamp line, because swapping the textarea
+   itself would move the caret out from under the user. #}
+
+<div class="grid gap-3">
+  {% for note in notes %}
+    <div class="rounded-lg border border-neutral-800">
+      <div class="flex items-center justify-between gap-2 border-b border-neutral-800 px-2 py-1">
+        <span id="note-saved-{{ note['id'] }}" class="faint text-[11px]">
+          {% with note = note %}{% include "partials/note_saved.html" %}{% endwith %}
+        </span>
+        <div class="flex items-center gap-1">
+          <button
+            id="note-toggle-{{ note['id'] }}"
+            type="button"
+            class="btn btn-ghost !px-2 !py-0.5 text-[11px]"
+            onclick="Mouseion.togglePreview({{ note['id'] }})"
+          >
+            Preview
+          </button>
+          <button
+            type="button"
+            class="btn btn-ghost !px-2 !py-0.5 text-[11px] hover:!text-red-300"
+            hx-delete="/ui/papers/{{ paper_id }}/notes/{{ note['id'] }}"
+            hx-target="#notes"
+            hx-swap="innerHTML"
+            hx-confirm="Delete this note?"
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+
+      <textarea
+        id="note-editor-{{ note['id'] }}"
+        name="content"
+        rows="6"
+        class="field !rounded-t-none !border-0 !bg-transparent font-mono text-[13px] leading-relaxed"
+        placeholder="Markdown. Autosaves as you type."
+        hx-put="/ui/papers/{{ paper_id }}/notes/{{ note['id'] }}"
+        hx-trigger="keyup changed delay:800ms, blur"
+        hx-target="#note-saved-{{ note['id'] }}"
+        hx-swap="innerHTML"
+      >{{ note["content"] }}</textarea
+      >
+
+      <div id="note-preview-{{ note['id'] }}" class="markdown hidden px-3 py-2 text-[13px]"></div>
+    </div>
+  {% else %}
+    <p class="faint text-xs">
+      No notes yet. “New note” opens a markdown editor that saves as you type.
+    </p>
+  {% endfor %}
+</div>

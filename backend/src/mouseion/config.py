@@ -72,6 +72,22 @@ class Settings(BaseModel):
     log_level: str = "INFO"
     frontend_dir: Path = Field(default=Path("./frontend"))
 
+    # Where Open WebUI is reachable *from the browser*, not from inside the
+    # compose network. Phase 2 only needs it to build the (disabled) "Ask about
+    # this paper" / "Test me" deep links; Phase 3 turns them on, and the link
+    # target is already decided: a chat pre-filled with `[paper:{id}] ...`.
+    openwebui_base_url: str = "http://localhost:3000"
+
+    @property
+    def templates_dir(self) -> Path:
+        """Jinja templates for the server-rendered UI."""
+        return self.frontend_dir / "templates"
+
+    @property
+    def static_dir(self) -> Path:
+        """CSS/JS, served publicly at /static (see auth.py)."""
+        return self.frontend_dir / "static"
+
     @property
     def pdf_dir(self) -> Path:
         """Content-addressed PDF store: data/pdfs/<sha256>.pdf."""
@@ -117,4 +133,5 @@ def get_settings() -> Settings:
         ingest_text_budget_chars=_env_int("INGEST_TEXT_BUDGET_CHARS", 24_000),
         log_level=_env("LOG_LEVEL", "INFO"),
         frontend_dir=Path(_env("FRONTEND_DIR", "./frontend")),
+        openwebui_base_url=_env("OPENWEBUI_BASE_URL", "http://localhost:3000").rstrip("/"),
     )

@@ -1,8 +1,8 @@
-# Mouseion — Phase 1
+# Mouseion — Phases 1-2
 #
 # Recipes use a leading TAB (GNU make). If you are on Windows without make,
 # every target's body is a plain docker compose / pytest command you can paste;
-# see PHASE1_NOTES.md ("Running without make").
+# see PROJECT_NOTES.md ("Running without make").
 
 SHELL := /bin/sh
 COMPOSE ?= docker compose
@@ -20,7 +20,8 @@ env: ## Create .env from .env.example if it does not exist
 up: env ## Build if needed, run migrations, start the stack
 	$(COMPOSE) up -d --build
 	@echo "api:      http://localhost:$${API_PORT:-8000}"
-	@echo "list view: http://localhost:$${API_PORT:-8000}/"
+	@echo "library:  http://localhost:$${API_PORT:-8000}/"
+	@echo "taxonomy: http://localhost:$${API_PORT:-8000}/taxonomy"
 
 down: ## Stop the stack (keeps ./data and volumes)
 	$(COMPOSE) down

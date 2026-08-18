@@ -6,6 +6,7 @@ fastapi==0.141.1
 uvicorn[standard]==0.52.3
 pydantic==2.13.4
 python-multipart==0.0.32          # multipart/form-data PDF upload
+jinja2==3.1.6                     # server-rendered UI + HTMX fragments (Phase 2)
 
 # --- Persistence ---
 alembic==1.19.1                   # migrations from day one; pulls SQLAlchemy,

@@ -5,7 +5,8 @@
 #   redis    — arq's broker (see backend/src/mouseion/worker.py for why arq)
 #   migrate  — runs `alembic upgrade head` once, then exits; api and worker
 #              both wait for it so neither can race the schema into existence
-#   api      — FastAPI: ingest endpoints + the Phase 1 list view
+#   api      — FastAPI: ingest + search + taxonomy endpoints, and the web UI
+#              (Jinja shells + HTMX fragments) served from ./frontend
 #   worker   — arq worker running the ingest pipeline
 #   open-webui — stock container, chat surface only (CLAUDE.md service 3).
 #              Behind the `webui` profile: it is not needed until the Phase 3

@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% block title %}Mouseion — library{% endblock %}
+
+{#
+  Library view.
+
+  Two HTMX sources, deliberately kept apart so one does not reload the other:
+    #q        — search text, debounced; includes #filters
+    #filters  — topic/status/year/sort; includes #q
+  `q` sits *outside* the form on purpose: inside it, its change-on-blur would
+  bubble to the form and fire a second identical request.
+#}
+
+{% block body %}
+<div class="flex">
+  <!-- ------------------------------------------------------------- sidebar -->
+  {# Below lg the sidebar is a fixed overlay drawer rather than a flex column:
+     in the flow it would take 16rem out of a 390px viewport and push the
+     results off-screen. #}
+  <div id="sidebar-backdrop" class="hidden fixed inset-0 z-30 bg-black/60 lg:hidden"></div>
+
+  <aside
+    id="sidebar"
+    class="hidden overflow-y-auto scroll-thin border-r border-neutral-800 p-2
+           max-lg:fixed max-lg:left-0 max-lg:top-[45px] max-lg:bottom-0 max-lg:z-40
+           max-lg:w-[17rem] max-lg:bg-[var(--panel)] max-lg:shadow-2xl
+           lg:block lg:w-64 lg:flex-none lg:sticky lg:top-[45px] lg:h-[calc(100vh-45px)]"
+  >
+    <div class="flex items-center justify-between px-1.5 pb-1.5">
+      <h2 class="faint text-[11px] font-medium uppercase tracking-wider">Topics</h2>
+      <a href="/taxonomy" class="faint text-[11px] hover:text-neutral-200">Manage</a>
+    </div>
+
+    <div
+      id="topic-tree"
+      class="busy-dim"
+      hx-get="/ui/topics"
+      hx-trigger="load, mouseion:auth from:body, mouseion:tree from:body"
+      hx-swap="innerHTML"
+      hx-vals="js:{topic_id: (document.getElementById('topic_id') || {}).value || ''}"
+    >
+      <p class="faint px-1 py-3 text-xs">Loading topics…</p>
+    </div>
+  </aside>
+
+  <!-- ---------------------------------------------------------------- main -->
+  <main class="min-w-0 flex-1 px-3 py-3 sm:px-4">
+    <div class="mx-auto max-w-4xl">
+      <!-- search -->
+      <div class="relative">
+        <svg
+          class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 muted"
+          width="14"
+          height="14"
+          viewBox="0 0 16 16"
+          fill="currentColor"
+          aria-hidden="true"
+        >
+          <path
+            d="M6.8 1.2a5.6 5.6 0 104.06 9.44l3.25 3.25 1.13-1.13-3.25-3.25A5.6 5.6 0 006.8 1.2zm0 1.6a4 4 0 110 8 4 4 0 010-8z"
+          />
+        </svg>
+        <input
+          id="q"
+          name="q"
+          type="search"
+          class="field !py-2 pl-9"
+          placeholder="Search titles, abstracts, summaries, full text…"
+          autocomplete="off"
+          aria-label="Search papers"
+          hx-get="/ui/results"
+          hx-target="#results"
+          hx-swap="innerHTML"
+          hx-include="#filters"
+          hx-trigger="keyup changed delay:250ms, search"
+          hx-indicator="#results"
+        />
+      </div>
+
+      <!-- filters -->
+      <form
+        id="filters"
+        class="mt-2 flex flex-wrap items-center gap-1.5 text-xs"
+        hx-get="/ui/results"
+        hx-target="#results"
+        hx-swap="innerHTML"
+        hx-include="#q"
+        hx-trigger="change, load, mouseion:auth from:body, mouseion:refresh from:body"
+        hx-indicator="#results"
+        onsubmit="return false"
+      >
+        <input type="hidden" id="topic_id" name="topic_id" value="{{ topic_id or '' }}" />
+
+        <span
+          class="chip {{ '' if topic_id else 'hidden' }}"
+          title="Includes every sub-topic"
+        >
+          {# Label is filled by app.js from the topic tree; the shell is public
+             and must not carry topic names. #}
+          <span id="topic-filter-label">topic</span>
+          <button
+            type="button"
+            class="faint hover:text-neutral-200"
+            aria-label="Clear topic filter"
+            onclick="Mouseion.clearTopic()"
+          >
+            ✕
+          </button>
+        </span>
+
+        <select id="status" name="status" class="field w-auto" aria-label="Reading status">
+          <option value="">Any status</option>
+          {% for value, label, _ in STATUSES %}
+            <option value="{{ value }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+
+        <div class="flex items-center gap-1">
+          <input
+            name="year_from"
+            type="number"
+            inputmode="numeric"
+            class="field w-[5.5rem]"
+            placeholder="From"
+            aria-label="Year from"
+            min="1600"
+            max="2200"
+          />
+          <span class="faint">–</span>
+          <input
+            name="year_to"
+            type="number"
+            inputmode="numeric"
+            class="field w-[5.5rem]"
+            placeholder="To"
+            aria-label="Year to"
+            min="1600"
+            max="2200"
+          />
+        </div>
+
+        <select id="sort" name="sort" class="field w-auto" aria-label="Sort order">
+          <option value="">Sort: default</option>
+          <option value="relevance">Relevance</option>
+          <option value="added_at">Recently added</option>
+          <option value="year">Year</option>
+        </select>
+
+        <button type="button" class="btn btn-ghost" onclick="Mouseion.resetFilters()">Reset</button>
+      </form>
+
+      <!-- results -->
+      <div id="results" class="busy-dim mt-3">
+        <p class="faint py-8 text-center text-sm">Loading…</p>
+      </div>
+    </div>
+  </main>
+</div>
+{% endblock %}

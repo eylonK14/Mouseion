@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from mouseion import __version__
-from mouseion.api import health, jobs, papers
+from mouseion.api import health, jobs, notes, papers, search, topics, ui
 from mouseion.auth import BearerAuthMiddleware
 from mouseion.config import get_settings
 from mouseion.services import queue
@@ -44,15 +44,25 @@ def create_app() -> FastAPI:
 
     app.include_router(health.router)
     app.include_router(papers.router)
+    app.include_router(notes.router)
+    app.include_router(search.router)
+    app.include_router(topics.router)
     app.include_router(jobs.router)
 
-    # Mounted last so it only catches paths no API route claimed. Phase 2
-    # replaces the contents of this directory with a real build.
-    frontend_dir = settings.frontend_dir
-    if frontend_dir.is_dir():
-        app.mount("/", StaticFiles(directory=str(frontend_dir), html=True), name="frontend")
+    static_dir = settings.static_dir
+    if static_dir.is_dir():
+        app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
     else:
-        log.warning("FRONTEND_DIR %s does not exist; list view not served", frontend_dir)
+        log.warning("static dir %s does not exist; the UI will be unstyled", static_dir)
+
+    # Last: the UI owns "/" and "/papers/{id}", which must not shadow any API
+    # route. (They cannot — every API route is under /api — but the ordering
+    # keeps that true if one is ever added at the root.)
+    if settings.templates_dir.is_dir():
+        ui.reset_templates()
+        app.include_router(ui.router)
+    else:
+        log.warning("templates dir %s does not exist; UI not served", settings.templates_dir)
 
     return app
 

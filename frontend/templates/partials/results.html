@@ -1,0 +1,68 @@
+{# Search results / filtered browse. Swapped into #results by HTMX. #}
+{% from "partials/paper_card.html" import paper_card %}
+
+<div class="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-0.5 pb-2 text-xs">
+  <span class="muted">
+    {{ total }} paper{{ "" if total == 1 else "s" }}
+    {%- if query.q %} matching “{{ query.q }}”{% endif -%}
+    {%- if topic %} in <span class="text-sky-300">{{ topic.name }}</span> and below{% endif -%}
+    {%- if query.status %} · {{ STATUS_LABELS.get(query.status, query.status) }}{% endif -%}
+    {%- if query.year_from or query.year_to %}
+      · {{ query.year_from or "…" }}–{{ query.year_to or "…" }}
+    {%- endif -%}
+  </span>
+  <span class="faint">sorted by {{ query.sort | replace("_", " ") }}</span>
+</div>
+
+{% if hits %}
+  <div class="grid gap-2">
+    {% for hit in hits %}{{ paper_card(hit) }}{% endfor %}
+  </div>
+
+  {% if total > query.limit %}
+    {% set page = (query.offset // query.limit) + 1 %}
+    {% set pages = ((total - 1) // query.limit) + 1 %}
+    <nav class="mt-3 flex items-center justify-between gap-2 text-xs" aria-label="Pagination">
+      <button
+        class="btn"
+        {% if query.offset <= 0 %}disabled{% endif %}
+        hx-get="/ui/results"
+        hx-include="#filters, #q"
+        hx-vals='{"offset": {{ [query.offset - query.limit, 0] | max }}}'
+        hx-target="#results"
+        hx-swap="innerHTML"
+      >
+        ← Previous
+      </button>
+      <span class="muted tabular-nums">Page {{ page }} of {{ pages }}</span>
+      <button
+        class="btn"
+        {% if query.offset + query.limit >= total %}disabled{% endif %}
+        hx-get="/ui/results"
+        hx-include="#filters, #q"
+        hx-vals='{"offset": {{ query.offset + query.limit }}}'
+        hx-target="#results"
+        hx-swap="innerHTML"
+      >
+        Next →
+      </button>
+    </nav>
+  {% endif %}
+{% else %}
+  <div class="panel px-4 py-10 text-center">
+    <p class="muted text-sm">
+      {% if query.q or query.topic_id or query.status or query.year_from or query.year_to %}
+        Nothing matches these filters.
+      {% else %}
+        Your library is empty. Add a paper to get started.
+      {% endif %}
+    </p>
+    {% if query.q or query.topic_id or query.status or query.year_from or query.year_to %}
+      <button class="btn mt-3" type="button" onclick="Mouseion.resetFilters()">Clear filters</button>
+    {% else %}
+      <button class="btn btn-primary mt-3" type="button" onclick="document.getElementById('upload-dialog').showModal()">
+        Add a paper
+      </button>
+    {% endif %}
+  </div>
+{% endif %}

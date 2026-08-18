@@ -3,14 +3,33 @@
 from __future__ import annotations
 
 import sqlite3
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, BeforeValidator, Field, field_validator
 
 from mouseion.services.papers import split_authors
-from mouseion.services.taxonomy import TopicRow
+from mouseion.services.taxonomy import TopicNode, TopicRow
 
 PaperStatus = Literal["to_read", "reading", "read", "understood"]
+
+
+def _blank_to_none(value: Any) -> Any:
+    """Treat an empty query-string value as "not supplied".
+
+    An HTML form submits every control it contains, so an untouched `<select>`
+    or number field arrives as `?status=&year_from=`. Without this the filter
+    bar 422s the moment it loads, and the JSON API is stricter than any browser
+    can be. Whitespace-only is the same thing.
+    """
+    if isinstance(value, str) and not value.strip():
+        return None
+    return value
+
+
+#: An optional int that also accepts "" (see `_blank_to_none`).
+BlankableInt = Annotated[int | None, BeforeValidator(_blank_to_none)]
+#: An optional reading status that also accepts "".
+BlankableStatus = Annotated[PaperStatus | None, BeforeValidator(_blank_to_none)]
 
 
 class TopicOut(BaseModel):
@@ -65,6 +84,160 @@ class PaperListOut(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class PaperTopicIn(BaseModel):
+    """Tag a paper with a topic that already exists in the taxonomy."""
+
+    topic_id: int
+
+
+class PaperPatchIn(BaseModel):
+    """Reading-workflow updates.
+
+    Only `status` is writable. Bibliographic fields come from arXiv or the
+    ingest model and are corrected by re-ingesting, not by hand-editing rows.
+    """
+
+    status: PaperStatus
+
+
+# --------------------------------------------------------------------- search
+class SearchHit(BaseModel):
+    """One result. `paper` is the same object `/api/papers` returns.
+
+    Kept as a wrapper rather than extra fields on PaperOut so Phase 3 can hand
+    the identical structure to the "papers consulted" list, with `score`
+    carrying retrieval confidence instead of BM25.
+    """
+
+    paper: PaperOut
+    # Higher is better; None when browsing without a query. Derived from
+    # bm25(), so it is comparable within one result set, not across queries.
+    score: float | None = None
+    # HTML-escaped, with <mark> around the matched terms. Safe to inject.
+    snippet: str | None = None
+
+
+class SearchQueryOut(BaseModel):
+    """The effective query, echoed back — `sort` may differ from what was asked
+    for (relevance falls back to added_at when there is no query text)."""
+
+    q: str | None = None
+    topic_id: int | None = None
+    status: PaperStatus | None = None
+    year_from: int | None = None
+    year_to: int | None = None
+    sort: str = "added_at"
+
+
+class SearchOut(BaseModel):
+    items: list[SearchHit]
+    total: int
+    limit: int
+    offset: int
+    query: SearchQueryOut
+
+
+# --------------------------------------------------------------------- topics
+class TopicNodeOut(BaseModel):
+    id: int
+    name: str
+    parent_id: int | None = None
+    #: papers tagged with this topic exactly
+    paper_count: int = 0
+    #: papers tagged with this topic or anything below it, each counted once
+    total_count: int = 0
+    children: list[TopicNodeOut] = Field(default_factory=list)
+
+    @classmethod
+    def from_node(cls, node: TopicNode) -> TopicNodeOut:
+        return cls(
+            id=node.id,
+            name=node.name,
+            parent_id=node.parent_id,
+            paper_count=node.paper_count,
+            total_count=node.total_count,
+            children=[cls.from_node(child) for child in node.children],
+        )
+
+
+class TopicTreeOut(BaseModel):
+    items: list[TopicNodeOut]
+    total_topics: int
+
+
+class TopicCreateIn(BaseModel):
+    name: str
+    parent_id: int | None = None
+
+
+class TopicPatchIn(BaseModel):
+    """Rename and/or re-parent.
+
+    `parent_id` is tri-state: absent leaves the parent alone, `null` promotes
+    the topic to a root, an int moves it. Routes must read
+    `model_fields_set` to tell the first two apart.
+    """
+
+    name: str | None = None
+    parent_id: int | None = None
+
+
+class TopicMergeIn(BaseModel):
+    """Merge this topic into `into_topic_id`; this topic then ceases to exist."""
+
+    into_topic_id: int
+
+
+class TopicMergeOut(BaseModel):
+    target: TopicOut
+    papers_relinked: int
+    children_moved: int
+
+
+class TopicSplitIn(BaseModel):
+    name: str
+    paper_ids: list[int]
+
+
+class TopicSplitOut(BaseModel):
+    source: TopicOut
+    created: TopicOut
+    papers_moved: int
+
+
+class TopicDeleteOut(BaseModel):
+    deleted: TopicOut
+    paper_links_removed: int
+    children_promoted: int
+
+
+# ---------------------------------------------------------------------- notes
+class NoteOut(BaseModel):
+    id: int
+    paper_id: int
+    content: str
+    created_at: str
+    updated_at: str
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> NoteOut:
+        return cls(
+            id=row["id"],
+            paper_id=row["paper_id"],
+            content=row["content"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+
+class NoteListOut(BaseModel):
+    items: list[NoteOut]
+
+
+class NoteIn(BaseModel):
+    content: str = ""
 
 
 class JobOut(BaseModel):

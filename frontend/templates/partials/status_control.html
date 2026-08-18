@@ -1,0 +1,21 @@
+{# Reading-status control. Swaps itself (outerHTML) on change, so the little
+   "saved" tick comes back from the server rather than being guessed. #}
+<div id="status-control" class="flex items-center gap-2">
+  <label class="faint text-[11px] uppercase tracking-wider" for="status-select">Status</label>
+  <select
+    id="status-select"
+    name="status"
+    class="field w-auto"
+    hx-post="/ui/papers/{{ paper_id }}/status"
+    hx-trigger="change"
+    hx-target="#status-control"
+    hx-swap="outerHTML"
+  >
+    {% for value, label, _ in STATUSES %}
+      <option value="{{ value }}" {% if value == status %}selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+  </select>
+  {% if saved %}
+    <span class="text-[11px] text-emerald-400">saved</span>
+  {% endif %}
+</div>

@@ -24,6 +24,23 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 EMBEDDING_DIM = 384
 
 
+def _frontend_dir() -> Path:
+    """Locate frontend/ in either layout.
+
+    In a checkout it is `<repo>/frontend`, a sibling of `backend/`. In the api
+    image `backend/` *is* `/app`, and compose mounts frontend at
+    `/app/frontend` — so the sibling guess resolves to `/frontend` and the UI
+    tests would silently run against a server with no templates.
+    """
+    for candidate in (BACKEND_ROOT.parent / "frontend", BACKEND_ROOT / "frontend"):
+        if (candidate / "templates").is_dir():
+            return candidate
+    return BACKEND_ROOT.parent / "frontend"
+
+
+FRONTEND_DIR = _frontend_dir()
+
+
 # ---------------------------------------------------------------------------
 # environment
 # ---------------------------------------------------------------------------
@@ -39,7 +56,7 @@ def _configure_env(monkeypatch: pytest.MonkeyPatch, data_dir: Path) -> None:
     monkeypatch.setenv("EMBEDDING_MODEL", "test/embedder")
     monkeypatch.setenv("EMBEDDING_DIM", str(EMBEDDING_DIM))
     monkeypatch.setenv("TREE_INDEXER", "heuristic")
-    monkeypatch.setenv("FRONTEND_DIR", str(BACKEND_ROOT.parent / "frontend"))
+    monkeypatch.setenv("FRONTEND_DIR", str(FRONTEND_DIR))
     get_settings.cache_clear()
 
 

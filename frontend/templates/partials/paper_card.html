@@ -1,0 +1,87 @@
+{#
+  THE reusable result card.
+
+  Phase 3 renders "papers consulted" for a QA answer with this exact macro, so
+  a QA citation and a search result look and behave identically:
+
+      {% from "partials/paper_card.html" import paper_card %}
+      {{ paper_card(hit) }}
+
+  `hit` is the SearchHit shape from api/models.py — {paper, score, snippet} —
+  whether it came from BM25 or from vector retrieval. Nothing in here knows
+  which. Pass `show_score=true` to surface the number during retrieval
+  debugging.
+
+  `hit.snippet` is already HTML-escaped by services/search.py::highlight, with
+  <mark> around the matches; that is the only reason it is rendered `| safe`.
+#}
+
+{% macro status_badge(status) -%}
+<span
+  class="chip ring-1 ring-inset {{ STATUS_CLASSES.get(status, STATUS_CLASSES['to_read']) }}"
+  >{{ STATUS_LABELS.get(status, status) }}</span
+>
+{%- endmacro %}
+
+{% macro paper_card(hit, show_score=false) -%}
+{% set paper = hit.paper %}
+<article
+  class="panel p-3 sm:p-4 hover:border-neutral-700 transition-colors"
+  data-paper-id="{{ paper.id }}"
+>
+  <div class="flex items-start gap-3">
+    <div class="min-w-0 flex-1">
+      <h3 class="font-medium leading-snug">
+        <a href="/papers/{{ paper.id }}" class="hover:text-sky-300">
+          {{ paper.title or "(untitled — ingest may still be running)" }}
+        </a>
+      </h3>
+
+      <p class="muted mt-1 text-xs">
+        {%- if paper.authors -%}
+          {{ paper.authors[:6] | join(", ") }}{% if paper.authors | length > 6 %} et al.{% endif %}
+        {%- else -%}
+          <span class="faint">authors unknown</span>
+        {%- endif -%}
+        {%- if paper.year %} · {{ paper.year }}{% endif -%}
+        {%- if paper.venue %} · {{ paper.venue }}{% endif -%}
+      </p>
+    </div>
+
+    <div class="flex flex-none flex-col items-end gap-1">
+      {{ status_badge(paper.status) }}
+      {% if show_score and hit.score is not none %}
+        <span class="faint text-[10px] tabular-nums" title="Retrieval score, higher is better"
+          >{{ "%.2f" | format(hit.score) }}</span
+        >
+      {% endif %}
+    </div>
+  </div>
+
+  {% if hit.snippet %}
+    <p class="mt-2 text-[13px] leading-relaxed text-neutral-300">{{ hit.snippet | safe }}</p>
+  {% elif paper.summary_short %}
+    <p class="muted mt-2 text-[13px] leading-relaxed line-clamp-3">{{ paper.summary_short }}</p>
+  {% endif %}
+
+  {% if paper.topics %}
+    <div class="mt-2.5 flex flex-wrap gap-1">
+      {% for topic in paper.topics %}
+        {# Filtering by a chip is a library-view action; on a page without the
+           filter form (a QA answer, say) app.js sends it to the library
+           instead. Wired by delegation — see partials/topic_tree.html. #}
+        <button
+          type="button"
+          class="chip chip-button"
+          data-topic-filter
+          data-topic-id="{{ topic.id }}"
+          data-topic-name="{{ topic.name }}"
+          title="Show papers under “{{ topic.name }}”"
+        >
+          {{ topic.name }}
+        </button>
+      {% endfor %}
+    </div>
+  {% endif %}
+</article>
+{%- endmacro %}

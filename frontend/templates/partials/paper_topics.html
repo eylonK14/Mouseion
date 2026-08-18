@@ -1,0 +1,56 @@
+{# Topic chips for one paper, plus a picker limited to the existing taxonomy.
+
+   There is no free-text box here on purpose — CLAUDE.md's drift rule says
+   topics are chosen, never typed. New topics are created deliberately on the
+   taxonomy page. #}
+
+<div class="flex flex-wrap items-center gap-1.5">
+  {% for topic in topics %}
+    <span class="chip">
+      <button
+        type="button"
+        class="chip-button !px-0 !bg-transparent"
+        data-topic-filter
+        data-topic-id="{{ topic.id }}"
+        data-topic-name="{{ topic.name }}"
+        title="Show papers under “{{ topic.name }}”"
+      >
+        {{ topic.name }}
+      </button>
+      <button
+        type="button"
+        class="faint hover:text-red-300"
+        aria-label="Remove topic {{ topic.name }}"
+        title="Remove"
+        hx-delete="/ui/papers/{{ paper_id }}/topics/{{ topic.id }}"
+        hx-target="#paper-topics"
+        hx-swap="innerHTML"
+      >
+        ✕
+      </button>
+    </span>
+  {% else %}
+    <span class="faint text-xs">No topics yet.</span>
+  {% endfor %}
+</div>
+
+{% if available %}
+  <form
+    class="mt-2.5 flex items-center gap-1.5"
+    hx-post="/ui/papers/{{ paper_id }}/topics"
+    hx-target="#paper-topics"
+    hx-swap="innerHTML"
+  >
+    <select name="topic_id" class="field w-auto max-w-[16rem] text-xs" aria-label="Add a topic">
+      {% for topic in available %}
+        <option value="{{ topic.id }}">{{ topic.name }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="btn text-xs">Add</button>
+  </form>
+{% else %}
+  <p class="faint mt-2 text-[11px]">
+    Every topic in the taxonomy is already on this paper.
+    <a href="/taxonomy" class="underline hover:text-neutral-200">Add one</a>.
+  </p>
+{% endif %}

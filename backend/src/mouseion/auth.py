@@ -6,12 +6,13 @@ reachable from a phone over Tailscale.
 Exemptions, and why they are the only ones:
 
 * `/health` — required by the compose healthcheck, exposes nothing.
-* The list-view shell (`/`, `/index.html`, `/static/*`) — a browser cannot
-  attach an `Authorization` header to a top-level navigation, so a protected
-  shell would be unreachable by design. The shell is a static page containing
-  no library data; it prompts for the token and sends it on every `/api/*`
-  request, all of which are protected. `/docs` and `/openapi.json` are NOT
-  exempt.
+* The UI shells (`/`, `/papers/{id}`, `/taxonomy`, `/static/*`) — a browser
+  cannot attach an `Authorization` header to a top-level navigation, so a
+  protected shell would be unreachable by design. A shell is markup containing
+  no library data; it prompts for the token and sends it on every `/api/*` and
+  `/ui/*` request, all of which are protected. In particular `/papers/{id}`
+  renders without looking the paper up, so being public does not even leak
+  which ids exist. `/docs` and `/openapi.json` are NOT exempt.
 
 Fails closed: with no API_TOKEN configured, every protected route returns 503
 rather than silently accepting anonymous traffic.
@@ -19,6 +20,7 @@ rather than silently accepting anonymous traffic.
 
 from __future__ import annotations
 
+import re
 import secrets
 
 from starlette.requests import Request
@@ -27,12 +29,19 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from mouseion.config import get_settings
 
-PUBLIC_PATHS = frozenset({"/health", "/", "/index.html", "/favicon.ico"})
+PUBLIC_PATHS = frozenset({"/health", "/", "/index.html", "/favicon.ico", "/taxonomy"})
 PUBLIC_PREFIXES = ("/static/",)
+# Only the shell. `/papers/12/anything` is not a route, and matching loosely
+# here would expose whatever a later phase mounts underneath it.
+PUBLIC_PATTERNS = (re.compile(r"^/papers/\d+$"),)
 
 
 def is_public(path: str) -> bool:
-    return path in PUBLIC_PATHS or path.startswith(PUBLIC_PREFIXES)
+    return (
+        path in PUBLIC_PATHS
+        or path.startswith(PUBLIC_PREFIXES)
+        or any(pattern.match(path) for pattern in PUBLIC_PATTERNS)
+    )
 
 
 def extract_bearer(header: str | None) -> str | None:

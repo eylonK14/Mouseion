@@ -175,7 +175,7 @@ def topics_for_paper(conn: sqlite3.Connection, paper_id: int) -> list[TopicRow]:
 def topics_for_papers(
     conn: sqlite3.Connection, paper_ids: Iterable[int]
 ) -> dict[int, list[TopicRow]]:
-    """Batch variant — keeps the list view to two queries instead of N+1."""
+    """Batch variant — keeps a page of results to two queries instead of N+1."""
     ids = list(paper_ids)
     if not ids:
         return {}
@@ -194,3 +194,335 @@ def topics_for_papers(
     for row in rows:
         out[row["paper_id"]].append(_row(row))
     return out
+
+
+# ---------------------------------------------------------------------------
+# hierarchy walks
+#
+# The taxonomy is a few hundred rows at most, so every walk below loads the
+# whole table once and traverses it in Python. That is both faster than a
+# recursive CTE per question and immune to the non-termination a cycle would
+# cause in SQL — each walk carries a `seen` set, so it visits a topic at most
+# once no matter what the parent pointers say.
+# ---------------------------------------------------------------------------
+def _children_map(topics: Sequence[TopicRow]) -> dict[int | None, list[TopicRow]]:
+    known = {topic.id for topic in topics}
+    children: dict[int | None, list[TopicRow]] = {}
+    for topic in topics:
+        # A parent that no longer exists means the topic is effectively a root.
+        parent = topic.parent_id if topic.parent_id in known else None
+        children.setdefault(parent, []).append(topic)
+    return children
+
+
+def descendant_ids(
+    conn: sqlite3.Connection, topic_id: int, *, include_self: bool = True
+) -> list[int]:
+    """Every topic at or below `topic_id`, breadth-first."""
+    children = _children_map(list_topics(conn))
+    out: list[int] = [topic_id] if include_self else []
+    seen: set[int] = {topic_id}
+    frontier = [topic_id]
+    while frontier:
+        current = frontier.pop(0)
+        for child in children.get(current, []):
+            if child.id in seen:
+                continue
+            seen.add(child.id)
+            out.append(child.id)
+            frontier.append(child.id)
+    return out
+
+
+def ancestor_ids(conn: sqlite3.Connection, topic_id: int) -> list[int]:
+    """Ancestors of `topic_id`, nearest first. Stops on a cycle."""
+    by_id = {topic.id: topic for topic in list_topics(conn)}
+    out: list[int] = []
+    seen: set[int] = {topic_id}
+    current = by_id.get(topic_id)
+    while current is not None and current.parent_id is not None:
+        if current.parent_id in seen:
+            break
+        seen.add(current.parent_id)
+        out.append(current.parent_id)
+        current = by_id.get(current.parent_id)
+    return out
+
+
+@dataclass(slots=True)
+class TopicNode:
+    """One node of the tree returned by `GET /api/topics/tree`.
+
+    `paper_count` is the direct tagging count; `total_count` includes every
+    descendant and counts a paper once even when it is tagged with both a
+    parent and its child.
+    """
+
+    id: int
+    name: str
+    parent_id: int | None
+    paper_count: int = 0
+    total_count: int = 0
+    children: list[TopicNode] = field(default_factory=list)
+
+
+def build_topic_tree(conn: sqlite3.Connection) -> list[TopicNode]:
+    """The whole taxonomy as a nested, alphabetically ordered forest."""
+    topics = list_topics(conn)
+    children = _children_map(topics)
+
+    direct: dict[int, set[int]] = {topic.id: set() for topic in topics}
+    for row in conn.execute("SELECT topic_id, paper_id FROM paper_topics").fetchall():
+        bucket = direct.get(row["topic_id"])
+        if bucket is not None:
+            bucket.add(row["paper_id"])
+
+    visited: set[int] = set()
+
+    def build(topic: TopicRow) -> tuple[TopicNode, set[int]]:
+        visited.add(topic.id)
+        mine = direct.get(topic.id, set())
+        rolled = set(mine)
+        kids: list[TopicNode] = []
+        for child in children.get(topic.id, []):
+            if child.id in visited:
+                continue
+            node, below = build(child)
+            kids.append(node)
+            rolled |= below
+        return (
+            TopicNode(
+                id=topic.id,
+                name=topic.name,
+                parent_id=topic.parent_id,
+                paper_count=len(mine),
+                total_count=len(rolled),
+                children=kids,
+            ),
+            rolled,
+        )
+
+    return [build(root)[0] for root in children.get(None, [])]
+
+
+# ---------------------------------------------------------------------------
+# editing the taxonomy — the manual escape hatch for drift
+# ---------------------------------------------------------------------------
+class TopicError(ValueError):
+    """Base class for taxonomy edits the caller got wrong."""
+
+
+class TopicNotFoundError(TopicError):
+    pass
+
+
+class TopicNameConflictError(TopicError):
+    pass
+
+
+class TopicCycleError(TopicError):
+    """Re-parenting a topic under itself or one of its own descendants."""
+
+
+@dataclass(slots=True)
+class DeleteResult:
+    topic: TopicRow
+    paper_links_removed: int
+    children_promoted: int
+
+
+@dataclass(slots=True)
+class SplitResult:
+    source: TopicRow
+    created: TopicRow
+    papers_moved: int
+
+
+def _require(conn: sqlite3.Connection, topic_id: int) -> TopicRow:
+    topic = get_topic(conn, topic_id)
+    if topic is None:
+        raise TopicNotFoundError(f"topic {topic_id} not found")
+    return topic
+
+
+def rename_topic(conn: sqlite3.Connection, topic_id: int, name: str) -> TopicRow:
+    """Rename in place. Re-casing a topic is allowed; colliding is not."""
+    topic = _require(conn, topic_id)
+    clean = normalize_topic_name(name)
+    if not clean:
+        raise TopicError("topic name must not be empty")
+
+    clash = find_topic_by_name(conn, clean)
+    if clash is not None and clash.id != topic_id:
+        raise TopicNameConflictError(f"a topic named {clash.name!r} already exists")
+
+    conn.execute("UPDATE topics SET name = ? WHERE id = ?", (clean, topic_id))
+    return TopicRow(id=topic.id, name=clean, parent_id=topic.parent_id)
+
+
+def reparent_topic(conn: sqlite3.Connection, topic_id: int, parent_id: int | None) -> TopicRow:
+    """Move a topic under a new parent (None = make it a root). Cycle-safe."""
+    topic = _require(conn, topic_id)
+    if parent_id is not None:
+        if parent_id == topic_id:
+            raise TopicCycleError("a topic cannot be its own parent")
+        _require(conn, parent_id)
+        if parent_id in descendant_ids(conn, topic_id):
+            raise TopicCycleError(
+                f"topic {parent_id} is below topic {topic_id}; that would make a cycle"
+            )
+
+    conn.execute("UPDATE topics SET parent_id = ? WHERE id = ?", (parent_id, topic_id))
+    return TopicRow(id=topic.id, name=topic.name, parent_id=parent_id)
+
+
+@dataclass(slots=True)
+class MergeResult:
+    target: TopicRow
+    papers_relinked: int
+    children_moved: int
+
+
+def merge_topics(conn: sqlite3.Connection, source_id: int, target_id: int) -> MergeResult:
+    """Merge topic `source_id` into `target_id`: relink papers, then delete it.
+
+    This is the manual correction for taxonomy drift, so it is deliberately
+    total — after it returns, the source id does not exist and nothing that
+    referred to it has been lost.
+    """
+    if source_id == target_id:
+        raise TopicError("cannot merge a topic into itself")
+    source = _require(conn, source_id)
+    _require(conn, target_id)
+
+    with transaction(conn):
+        # Merging a parent into one of its own children would orphan the child
+        # the moment the parent row disappears (parent_id is ON DELETE SET
+        # NULL). Splice the target into the source's place first.
+        if target_id in descendant_ids(conn, source_id, include_self=False):
+            conn.execute(
+                "UPDATE topics SET parent_id = ? WHERE id = ?", (source.parent_id, target_id)
+            )
+
+        relinked = conn.execute(
+            """
+            INSERT OR IGNORE INTO paper_topics (paper_id, topic_id)
+            SELECT paper_id, ? FROM paper_topics WHERE topic_id = ?
+            """,
+            (target_id, source_id),
+        ).rowcount
+
+        moved = conn.execute(
+            "UPDATE topics SET parent_id = ? WHERE parent_id = ?", (target_id, source_id)
+        ).rowcount
+
+        # paper_topics rows for the source go with it (ON DELETE CASCADE).
+        conn.execute("DELETE FROM topics WHERE id = ?", (source_id,))
+
+    target = get_topic(conn, target_id)
+    assert target is not None
+    return MergeResult(
+        target=target, papers_relinked=max(relinked, 0), children_moved=max(moved, 0)
+    )
+
+
+def delete_topic(conn: sqlite3.Connection, topic_id: int) -> DeleteResult:
+    """Delete one topic without deleting its subtree or any papers.
+
+    Direct paper links disappear with the topic. Children are promoted to the
+    deleted topic's parent so the rest of the curated hierarchy stays intact.
+    """
+    topic = _require(conn, topic_id)
+    with transaction(conn):
+        links = int(
+            conn.execute(
+                "SELECT COUNT(*) AS n FROM paper_topics WHERE topic_id = ?", (topic_id,)
+            ).fetchone()["n"]
+        )
+        promoted = conn.execute(
+            "UPDATE topics SET parent_id = ? WHERE parent_id = ?", (topic.parent_id, topic_id)
+        ).rowcount
+        conn.execute("DELETE FROM topics WHERE id = ?", (topic_id,))
+    return DeleteResult(topic, links, max(promoted, 0))
+
+
+def split_topic(
+    conn: sqlite3.Connection, topic_id: int, new_name: str, paper_ids: Sequence[int]
+) -> SplitResult:
+    """Create a peer topic and move selected direct paper links into it."""
+    source = _require(conn, topic_id)
+    selected = list(dict.fromkeys(paper_ids))
+    if not selected:
+        raise TopicError("select at least one paper to move")
+
+    placeholders = ", ".join("?" for _ in selected)
+    linked = {
+        int(row["paper_id"])
+        for row in conn.execute(
+            f"SELECT paper_id FROM paper_topics WHERE topic_id = ? AND paper_id IN ({placeholders})",
+            (topic_id, *selected),
+        )
+    }
+    if linked != set(selected):
+        raise TopicError("every selected paper must be directly assigned to the source topic")
+
+    clean = normalize_topic_name(new_name)
+    if not clean:
+        raise TopicError("new topic name must not be empty")
+    if find_topic_by_name(conn, clean) is not None:
+        raise TopicNameConflictError(f"a topic named {clean!r} already exists")
+
+    with transaction(conn):
+        created, was_created = get_or_create_topic(conn, clean, source.parent_id)
+        if not was_created:
+            raise TopicNameConflictError(f"a topic named {clean!r} already exists")
+        conn.executemany(
+            "INSERT INTO paper_topics (paper_id, topic_id) VALUES (?, ?)",
+            [(paper_id, created.id) for paper_id in selected],
+        )
+        conn.executemany(
+            "DELETE FROM paper_topics WHERE paper_id = ? AND topic_id = ?",
+            [(paper_id, topic_id) for paper_id in selected],
+        )
+    return SplitResult(source, created, len(selected))
+
+
+def papers_by_topic(conn: sqlite3.Connection) -> dict[int, list[sqlite3.Row]]:
+    """All direct topic assignments for the taxonomy split controls, batched."""
+    rows = conn.execute(
+        """
+        SELECT pt.topic_id, p.id, p.title, p.authors, p.year
+        FROM paper_topics pt
+        JOIN papers p ON p.id = pt.paper_id
+        ORDER BY pt.topic_id, COALESCE(p.title, ''), p.id
+        """
+    ).fetchall()
+    grouped: dict[int, list[sqlite3.Row]] = {}
+    for row in rows:
+        grouped.setdefault(int(row["topic_id"]), []).append(row)
+    return grouped
+
+
+# ---------------------------------------------------------------------------
+# paper ↔ topic links
+# ---------------------------------------------------------------------------
+def add_paper_topic(conn: sqlite3.Connection, paper_id: int, topic_id: int) -> TopicRow:
+    """Tag a paper with an *existing* topic.
+
+    There is no create-on-the-fly variant on purpose: CLAUDE.md's drift rule
+    says topics are picked from the taxonomy, never typed free-form. Creating a
+    topic is its own deliberate act.
+    """
+    topic = _require(conn, topic_id)
+    conn.execute(
+        "INSERT OR IGNORE INTO paper_topics (paper_id, topic_id) VALUES (?, ?)",
+        (paper_id, topic_id),
+    )
+    return topic
+
+
+def remove_paper_topic(conn: sqlite3.Connection, paper_id: int, topic_id: int) -> bool:
+    cursor = conn.execute(
+        "DELETE FROM paper_topics WHERE paper_id = ? AND topic_id = ?", (paper_id, topic_id)
+    )
+    return cursor.rowcount > 0
