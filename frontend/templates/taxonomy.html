@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Mouseion — taxonomy{% endblock %}
+
+{% block body %}
+<main class="px-3 py-3 sm:px-4">
+  <div class="mx-auto max-w-3xl">
+    <a href="/" class="btn btn-ghost mb-2 text-xs">← Library</a>
+
+    <header class="mb-3">
+      <h1 class="text-lg font-semibold">Taxonomy</h1>
+      <p class="muted mt-1 text-[13px]">
+        Rename a topic, move it under another, or drag one topic onto another to merge them.
+        Merging relinks every paper and then deletes the topic you dragged — it is the manual
+        correction when the tagger drifts.
+      </p>
+    </header>
+
+    <div
+      id="taxonomy"
+      class="busy-dim"
+      hx-get="/ui/taxonomy"
+      hx-trigger="load, mouseion:auth from:body"
+      hx-swap="innerHTML"
+    >
+      <p class="faint py-10 text-center text-sm">Loading…</p>
+    </div>
+  </div>
+</main>
+{% endblock %}
+
+{% block dialogs %}
+<dialog id="merge-dialog" aria-labelledby="merge-title">
+  <div class="p-5 space-y-3">
+    <h2 id="merge-title" class="font-semibold">Merge topics</h2>
+    <p class="text-[13px] leading-relaxed">
+      Every paper tagged <span id="merge-source" class="chip"></span> will be tagged
+      <span id="merge-target" class="chip"></span> instead, its sub-topics move across, and the
+      first topic is deleted.
+    </p>
+    <p class="muted text-xs">This cannot be undone.</p>
+    <div class="flex justify-end gap-2 pt-1">
+      <button class="btn" onclick="document.getElementById('merge-dialog').close()">Cancel</button>
+      <button id="merge-confirm" class="btn btn-primary">Merge</button>
+    </div>
+  </div>
+</dialog>
+{% endblock %}

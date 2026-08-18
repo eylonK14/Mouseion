@@ -1,0 +1,79 @@
+{# Sidebar taxonomy. <details> gives collapse/expand with no JS.
+
+   Clicking a row filters the library. That is wired by delegation in app.js
+   (`[data-topic-filter]`) rather than an inline onclick: a topic name has to
+   survive being written into the page, and `tojson` does not escape the double
+   quote that would end an HTML attribute. Data attributes go through Jinja's
+   autoescaping instead. #}
+
+{% macro node(item, selected_id, depth) -%}
+{% if item.children %}
+  <details {% if depth < 1 %}open{% endif %}>
+    <summary>
+      <span
+        class="topic-row"
+        role="button"
+        tabindex="0"
+        data-topic-filter
+        data-topic-id="{{ item.id }}"
+        data-topic-name="{{ item.name }}"
+        aria-current="{{ 'true' if selected_id == item.id else 'false' }}"
+        title="{{ item.name }} — {{ item.total_count }} paper(s) including sub-topics"
+      >
+        <svg
+          data-caret
+          class="caret muted"
+          width="10"
+          height="10"
+          viewBox="0 0 10 10"
+          fill="currentColor"
+          aria-hidden="true"
+        >
+          <path d="M3 1l5 4-5 4z" />
+        </svg>
+        <span class="topic-name">{{ item.name }}</span>
+        <span class="faint text-[11px] tabular-nums">{{ item.total_count }}</span>
+      </span>
+    </summary>
+    <div class="ml-3 border-l border-neutral-800 pl-1">
+      {% for child in item.children %}{{ node(child, selected_id, depth + 1) }}{% endfor %}
+    </div>
+  </details>
+{% else %}
+  <button
+    type="button"
+    class="topic-row"
+    data-topic-filter
+    data-topic-id="{{ item.id }}"
+    data-topic-name="{{ item.name }}"
+    aria-current="{{ 'true' if selected_id == item.id else 'false' }}"
+    title="{{ item.name }} — {{ item.paper_count }} paper(s)"
+  >
+    <span class="w-[10px] flex-none"></span>
+    <span class="topic-name">{{ item.name }}</span>
+    <span class="faint text-[11px] tabular-nums">{{ item.paper_count }}</span>
+  </button>
+{% endif %}
+{%- endmacro %}
+
+<div class="tree text-[13px]">
+  <button
+    type="button"
+    class="topic-row font-medium"
+    data-topic-filter
+    data-topic-id=""
+    aria-current="{{ 'true' if selected_id is none else 'false' }}"
+  >
+    <span class="w-[10px] flex-none"></span>
+    <span class="topic-name">All papers</span>
+    <span class="faint text-[11px] tabular-nums">{{ total_papers }}</span>
+  </button>
+
+  {% for item in nodes %}{{ node(item, selected_id, 0) }}{% endfor %}
+
+  {% if not nodes %}
+    <p class="faint px-1 py-3 text-xs">
+      No topics yet — they appear as papers are ingested and tagged.
+    </p>
+  {% endif %}
+</div>

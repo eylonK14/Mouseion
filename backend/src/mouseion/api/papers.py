@@ -10,6 +10,7 @@ import logging
 import sqlite3
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import FileResponse
 from pydantic import ValidationError
 
 from mouseion.api.models import (
@@ -17,6 +18,8 @@ from mouseion.api.models import (
     IngestUrlIn,
     PaperListOut,
     PaperOut,
+    PaperPatchIn,
+    PaperTopicIn,
 )
 from mouseion.config import Settings, get_settings
 from mouseion.db import get_db
@@ -26,8 +29,14 @@ from mouseion.services.arxiv import normalize_arxiv_url
 from mouseion.services.hashing import sha256_bytes
 from mouseion.services.jobs import JobKind, JobState, create_job, set_state
 from mouseion.services.jobs import attach as attach_job
-from mouseion.services.pdfs import NotAPdfError, store_pdf
-from mouseion.services.taxonomy import topics_for_paper, topics_for_papers
+from mouseion.services.pdfs import NotAPdfError, pdf_path_for, store_pdf
+from mouseion.services.taxonomy import (
+    TopicNotFoundError,
+    add_paper_topic,
+    remove_paper_topic,
+    topics_for_paper,
+    topics_for_papers,
+)
 
 log = logging.getLogger(__name__)
 
@@ -181,16 +190,102 @@ def list_papers(
     )
 
 
+def _require_paper(conn: sqlite3.Connection, paper_id: int) -> sqlite3.Row:
+    row = papers_repo.get_paper(conn, paper_id)
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"paper {paper_id} not found")
+    return row
+
+
+def _paper_out(conn: sqlite3.Connection, row: sqlite3.Row) -> PaperOut:
+    paper_id = int(row["id"])
+    paper = PaperOut.from_row(row, topics_for_paper(conn, paper_id))
+    text = papers_repo.get_full_text(conn, paper_id)
+    if text is not None:
+        paper.n_pages = text["n_pages"]
+    return paper
+
+
 @router.get("/papers/{paper_id}", response_model=PaperOut)
 def get_paper(
     paper_id: int,
     conn: sqlite3.Connection = Depends(get_db),
 ) -> PaperOut:
-    row = papers_repo.get_paper(conn, paper_id)
-    if row is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"paper {paper_id} not found")
-    text = papers_repo.get_full_text(conn, paper_id)
-    paper = PaperOut.from_row(row, topics_for_paper(conn, paper_id))
-    if text is not None:
-        paper.n_pages = text["n_pages"]
-    return paper
+    return _paper_out(conn, _require_paper(conn, paper_id))
+
+
+@router.patch("/papers/{paper_id}", response_model=PaperOut)
+def patch_paper(
+    paper_id: int,
+    body: PaperPatchIn,
+    conn: sqlite3.Connection = Depends(get_db),
+) -> PaperOut:
+    """Reading-workflow update. Only `status` is writable.
+
+    Every transition among the four statuses is allowed — including going
+    backwards, which is what re-reading a paper actually looks like. The
+    validation is that the value is one of the four (Pydantic rejects anything
+    else with a 422 before this body runs) and that the paper exists; there is
+    deliberately no state machine on top of that, because the ordering exists
+    for display, not as a workflow to enforce on a single user.
+    """
+    _require_paper(conn, paper_id)
+    papers_repo.update_paper(conn, paper_id, status=body.status)
+    return _paper_out(conn, _require_paper(conn, paper_id))
+
+
+@router.get("/papers/{paper_id}/pdf")
+def get_paper_pdf(
+    paper_id: int,
+    conn: sqlite3.Connection = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> FileResponse:
+    """The stored PDF, for the detail page's viewer.
+
+    Behind the bearer token like every other /api route, which is why the
+    viewer fetches it with the token and renders a blob URL rather than
+    pointing an <iframe> straight at this path — a browser cannot attach a
+    header to an iframe's own request.
+    """
+    row = _require_paper(conn, paper_id)
+    path = pdf_path_for(settings.pdf_dir, row["sha256"])
+    if not path.is_file():
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            f"no stored PDF for paper {paper_id} (ingested from a URL that was never saved?)",
+        )
+    return FileResponse(
+        path,
+        media_type="application/pdf",
+        # inline, so the viewer displays it instead of the browser downloading.
+        headers={"Content-Disposition": f'inline; filename="paper-{paper_id}.pdf"'},
+    )
+
+
+# ------------------------------------------------------------- paper ↔ topics
+@router.post("/papers/{paper_id}/topics", response_model=PaperOut)
+def add_topic_to_paper(
+    paper_id: int,
+    body: PaperTopicIn,
+    conn: sqlite3.Connection = Depends(get_db),
+) -> PaperOut:
+    """Tag a paper with an existing topic (CLAUDE.md: never free-form tags)."""
+    row = _require_paper(conn, paper_id)
+    try:
+        add_paper_topic(conn, paper_id, body.topic_id)
+    except TopicNotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    return _paper_out(conn, row)
+
+
+@router.delete("/papers/{paper_id}/topics/{topic_id}", response_model=PaperOut)
+def remove_topic_from_paper(
+    paper_id: int,
+    topic_id: int,
+    conn: sqlite3.Connection = Depends(get_db),
+) -> PaperOut:
+    row = _require_paper(conn, paper_id)
+    # Removing a tag the paper does not have is a no-op, not an error: the UI
+    # sends this from a chip that may already be gone in another tab.
+    remove_paper_topic(conn, paper_id, topic_id)
+    return _paper_out(conn, row)

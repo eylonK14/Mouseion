@@ -1,0 +1,179 @@
+{# Taxonomy editor. Each row is a drag handle (drag A onto B = merge A into B)
+   and expands into rename / re-parent controls. #}
+
+{% macro row(item, topics, depth) -%}
+<li>
+  <div
+    class="topic-row cursor-grab"
+    draggable="true"
+    data-merge-handle
+    data-topic-id="{{ item.id }}"
+    data-topic-name="{{ item.name }}"
+    title="Drag onto another topic to merge"
+  >
+    <svg class="faint flex-none" width="10" height="12" viewBox="0 0 10 12" fill="currentColor" aria-hidden="true">
+      <circle cx="3" cy="2" r="1" /><circle cx="7" cy="2" r="1" />
+      <circle cx="3" cy="6" r="1" /><circle cx="7" cy="6" r="1" />
+      <circle cx="3" cy="10" r="1" /><circle cx="7" cy="10" r="1" />
+    </svg>
+    <span class="topic-name">{{ item.name }}</span>
+    <span class="faint flex-none text-[11px] tabular-nums" title="direct / including sub-topics">
+      {{ item.paper_count }} / {{ item.total_count }}
+    </span>
+    <button
+      type="button"
+      class="btn btn-ghost flex-none !px-2 !py-0.5 text-[11px]"
+      onclick="var e = this.closest('li').querySelector('[data-edit]'); e.classList.toggle('hidden')"
+    >
+      Edit
+    </button>
+  </div>
+
+  <div data-edit class="hidden ml-4 mb-2 grid gap-1.5 border-l border-neutral-800 pl-3 pt-1.5">
+    <form
+      class="flex flex-wrap items-center gap-1.5"
+      hx-post="/ui/taxonomy/topics/{{ item.id }}/rename"
+      hx-target="#taxonomy"
+      hx-swap="innerHTML"
+    >
+      <input
+        name="name"
+        class="field w-auto flex-1 min-w-[10rem] text-xs"
+        value="{{ item.name }}"
+        aria-label="Rename {{ item.name }}"
+      />
+      <button class="btn text-xs" type="submit">Rename</button>
+    </form>
+
+    <form
+      class="flex flex-wrap items-center gap-1.5"
+      hx-post="/ui/taxonomy/topics/{{ item.id }}/reparent"
+      hx-target="#taxonomy"
+      hx-swap="innerHTML"
+    >
+      <select
+        name="parent_id"
+        class="field w-auto flex-1 min-w-[10rem] text-xs"
+        aria-label="Move {{ item.name }} under"
+      >
+        <option value="">(top level)</option>
+        {% for candidate in topics %}
+          {# The server refuses a cycle anyway; omitting self here just keeps
+             the obvious mistake out of the menu. #}
+          {% if candidate.id != item.id %}
+            <option value="{{ candidate.id }}" {% if candidate.id == item.parent_id %}selected{% endif %}>
+              {{ candidate.name }}
+            </option>
+          {% endif %}
+        {% endfor %}
+      </select>
+      <button class="btn text-xs" type="submit">Move</button>
+    </form>
+
+    <form
+      class="flex flex-wrap items-center gap-1.5"
+      hx-post="/ui/taxonomy/topics/{{ item.id }}/merge"
+      hx-target="#taxonomy"
+      hx-swap="innerHTML"
+      hx-confirm="Merge “{{ item.name }}” into the selected topic? This deletes “{{ item.name }}”."
+    >
+      <select
+        name="into_topic_id"
+        class="field w-auto flex-1 min-w-[10rem] text-xs"
+        aria-label="Merge {{ item.name }} into"
+      >
+        {% for candidate in topics %}
+          {% if candidate.id != item.id %}
+            <option value="{{ candidate.id }}">{{ candidate.name }}</option>
+          {% endif %}
+        {% endfor %}
+      </select>
+      <button class="btn text-xs hover:!border-red-500/50 hover:!text-red-300" type="submit">
+        Merge into
+      </button>
+    </form>
+
+    {% set assigned = topic_papers.get(item.id, []) %}
+    {% if assigned %}
+      <form
+        class="grid gap-1.5 rounded-md border border-neutral-800 p-2"
+        hx-post="/ui/taxonomy/topics/{{ item.id }}/split"
+        hx-target="#taxonomy"
+        hx-swap="innerHTML"
+      >
+        <div class="faint text-[11px]">Split selected directly tagged papers into a new peer topic:</div>
+        <input
+          name="name"
+          class="field text-xs"
+          placeholder="New topic name"
+          aria-label="New topic split from {{ item.name }}"
+          required
+        />
+        <div class="max-h-32 overflow-y-auto rounded border border-neutral-800 p-1.5">
+          {% for paper in assigned %}
+            <label class="flex cursor-pointer items-start gap-2 px-1 py-1 text-xs hover:bg-neutral-800/50">
+              <input type="checkbox" name="paper_ids" value="{{ paper.id }}" class="mt-0.5" />
+              <span>{{ paper.title or ('Paper #' ~ paper.id) }}{% if paper.year %} ({{ paper.year }}){% endif %}</span>
+            </label>
+          {% endfor %}
+        </div>
+        <button class="btn justify-self-end text-xs" type="submit">Split selected</button>
+      </form>
+    {% endif %}
+
+    <button
+      class="btn justify-self-end text-xs hover:!border-red-500/50 hover:!text-red-300"
+      type="button"
+      hx-delete="/ui/taxonomy/topics/{{ item.id }}"
+      hx-target="#taxonomy"
+      hx-swap="innerHTML"
+      hx-confirm="Delete “{{ item.name }}”? Its direct paper links will be removed and its children promoted. Papers themselves will not be deleted."
+    >
+      Delete topic
+    </button>
+  </div>
+
+  {% if item.children %}
+    <ul class="ml-4 border-l border-neutral-800 pl-1">
+      {% for child in item.children %}{{ row(child, topics, depth + 1) }}{% endfor %}
+    </ul>
+  {% endif %}
+</li>
+{%- endmacro %}
+
+{% if message %}
+  <p class="mb-3 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-200">
+    {{ message }}
+  </p>
+{% endif %}
+
+<section class="panel p-3">
+  {% if nodes %}
+    <ul class="text-[13px]">
+      {% for item in nodes %}{{ row(item, topics, 0) }}{% endfor %}
+    </ul>
+  {% else %}
+    <p class="faint px-1 py-6 text-center text-xs">
+      No topics yet. They are created by the tagger during ingest, or by hand below.
+    </p>
+  {% endif %}
+</section>
+
+<section class="panel mt-3 p-3">
+  <h2 class="faint mb-2 text-[11px] font-medium uppercase tracking-wider">New topic</h2>
+  <form
+    class="flex flex-wrap items-center gap-1.5"
+    hx-post="/ui/taxonomy/topics"
+    hx-target="#taxonomy"
+    hx-swap="innerHTML"
+  >
+    <input name="name" class="field w-auto flex-1 min-w-[10rem] text-xs" placeholder="Topic name" required />
+    <select name="parent_id" class="field w-auto text-xs" aria-label="Parent topic">
+      <option value="">(top level)</option>
+      {% for candidate in topics %}
+        <option value="{{ candidate.id }}">{{ candidate.name }}</option>
+      {% endfor %}
+    </select>
+    <button class="btn btn-primary text-xs" type="submit">Create</button>
+  </form>
+</section>

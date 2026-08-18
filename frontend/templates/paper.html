@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Mouseion — paper{% endblock %}
+
+{# Shell only. It does not look the paper up (auth.py explains why), so a
+   missing id surfaces as a 404 from the authenticated fragment below. #}
+
+{% block body %}
+<main class="px-3 py-3 sm:px-4">
+  <div class="mx-auto max-w-5xl">
+    <a href="/" class="btn btn-ghost mb-2 text-xs">← Library</a>
+
+    <div
+      id="paper"
+      class="busy-dim"
+      hx-get="/ui/papers/{{ paper_id }}"
+      hx-trigger="load, mouseion:auth from:body"
+      hx-swap="innerHTML"
+    >
+      <p class="faint py-10 text-center text-sm">Loading…</p>
+    </div>
+  </div>
+</main>
+{% endblock %}
