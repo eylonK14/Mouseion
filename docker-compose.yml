@@ -9,8 +9,7 @@
 #              (Jinja shells + HTMX fragments) served from ./frontend
 #   worker   — arq worker running the ingest pipeline
 #   open-webui — stock container, chat surface only (CLAUDE.md service 3).
-#              Behind the `webui` profile: it is not needed until the Phase 3
-#              pipes exist, so `make up` stays lean. Start it with
+#              Behind the `webui` profile so `make up` stays lean. Start it with
 #              `docker compose --profile webui up -d`.
 
 name: mouseion
@@ -92,10 +91,19 @@ services:
       - "${WEBUI_PORT:-3000}:8080"
     volumes:
       - open-webui:/app/backend/data
-      # Phase 3+ pipes are mounted read-only; empty in Phase 1.
-      - ./pipes:/app/backend/data/pipelines:ro
+      # Pipe Function wrappers import/reload their transport implementation
+      # from this read-only source mount on every request.
+      - ./pipes:/app/backend/data/mouseion-pipes:ro
     environment:
       WEBUI_AUTH: "false"
+      # Mouseion pipes perform retrieval and inference in the API. Keep Open
+      # WebUI as a lightweight chat surface and do not block startup while it
+      # downloads local RAG/Whisper models that this integration never uses.
+      RAG_EMBEDDING_ENGINE: "openai"
+      RAG_EMBEDDING_MODEL_AUTO_UPDATE: "false"
+      RAG_RERANKING_MODEL_AUTO_UPDATE: "false"
+      WHISPER_MODEL_AUTO_UPDATE: "false"
+      ENABLE_VERSION_UPDATE_CHECK: "false"
     depends_on:
       api:
         condition: service_healthy

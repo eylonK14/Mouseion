@@ -47,6 +47,16 @@ class Settings(BaseModel):
     llm_timeout_seconds: int = 180
     llm_max_attempts: int = 2
 
+    # --- grounded QA ---
+    qa_candidate_k: int = 8
+    qa_max_navigations: int = 4
+    qa_sections_per_paper: int = 3
+    qa_context_budget_chars: int = 48_000
+    qa_section_budget_chars: int = 12_000
+    qa_tree_budget_chars: int = 16_000
+    qa_history_messages: int = 12
+    qa_history_budget_chars: int = 12_000
+
     # --- embeddings (local) ---
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     embedding_dim: int = 384
@@ -73,9 +83,8 @@ class Settings(BaseModel):
     frontend_dir: Path = Field(default=Path("./frontend"))
 
     # Where Open WebUI is reachable *from the browser*, not from inside the
-    # compose network. Phase 2 only needs it to build the (disabled) "Ask about
-    # this paper" / "Test me" deep links; Phase 3 turns them on, and the link
-    # target is already decided: a chat pre-filled with `[paper:{id}] ...`.
+    # compose network. Phase 3 uses it for the enabled paper-QA deep link;
+    # Phase 4 will use the same seam for the still-disabled examiner button.
     openwebui_base_url: str = "http://localhost:3000"
 
     @property
@@ -120,6 +129,14 @@ def get_settings() -> Settings:
         openrouter_app_title=_env("OPENROUTER_APP_TITLE", "Mouseion"),
         llm_timeout_seconds=_env_int("LLM_TIMEOUT_SECONDS", 180),
         llm_max_attempts=_env_int("LLM_MAX_ATTEMPTS", 2),
+        qa_candidate_k=_env_int("QA_CANDIDATE_K", 8),
+        qa_max_navigations=_env_int("QA_MAX_NAVIGATIONS", 4),
+        qa_sections_per_paper=_env_int("QA_SECTIONS_PER_PAPER", 3),
+        qa_context_budget_chars=_env_int("QA_CONTEXT_BUDGET_CHARS", 48_000),
+        qa_section_budget_chars=_env_int("QA_SECTION_BUDGET_CHARS", 12_000),
+        qa_tree_budget_chars=_env_int("QA_TREE_BUDGET_CHARS", 16_000),
+        qa_history_messages=_env_int("QA_HISTORY_MESSAGES", 12),
+        qa_history_budget_chars=_env_int("QA_HISTORY_BUDGET_CHARS", 12_000),
         embedding_model=_env("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2"),
         embedding_dim=_env_int("EMBEDDING_DIM", 384),
         tree_indexer=_env("TREE_INDEXER", "auto"),  # type: ignore[arg-type]

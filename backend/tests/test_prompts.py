@@ -13,7 +13,10 @@ from pathlib import Path
 from mouseion.services.prompts import (
     EMPTY_TAXONOMY,
     PROMPT_VERSION,
+    GroundingExcerpt,
+    QA_PROMPT_VERSION,
     bound_paper_text,
+    build_grounding_prompt,
     build_ingest_prompt,
     extract_section_headers,
     render_taxonomy_tree,
@@ -22,6 +25,7 @@ from mouseion.services.taxonomy import TopicRow
 
 FIXTURES = Path(__file__).parent / "fixtures"
 GOLDEN = FIXTURES / "ingest_prompt.golden.txt"
+QA_GOLDEN = FIXTURES / "grounding_prompt.golden.txt"
 
 TAXONOMY = [
     TopicRow(id=1, name="Machine Learning", parent_id=None),
@@ -54,9 +58,36 @@ def build_golden_prompt() -> str:
     return f"{prompt.system}\n===== USER =====\n{prompt.user}"
 
 
+def build_qa_golden_prompt() -> str:
+    prompt = build_grounding_prompt(
+        question="How do the papers characterize attention?",
+        excerpts=[
+            GroundingExcerpt(
+                paper_id=7,
+                paper_title="Attention Is All You Need",
+                section="3.2 Attention",
+                text="Scaled dot-product attention maps queries and keys to weighted values.",
+            ),
+            GroundingExcerpt(
+                paper_id=11,
+                paper_title="Attention Revisited",
+                section="Limitations",
+                text="The reported gains do not persist on the smallest evaluation split.",
+            ),
+        ],
+    )
+    return f"{prompt.system}\n===== USER =====\n{prompt.user}"
+
+
 def test_prompt_matches_golden_file() -> None:
     assert GOLDEN.exists(), "golden file missing — run tests/regenerate_golden.py"
     assert build_golden_prompt() == GOLDEN.read_text(encoding="utf-8")
+
+
+def test_grounding_prompt_matches_golden_file() -> None:
+    assert QA_GOLDEN.exists(), "golden file missing — run tests/regenerate_golden.py"
+    assert build_qa_golden_prompt() == QA_GOLDEN.read_text(encoding="utf-8")
+    assert QA_PROMPT_VERSION in build_qa_golden_prompt()
 
 
 def test_prompt_contains_the_rendered_taxonomy_tree() -> None:

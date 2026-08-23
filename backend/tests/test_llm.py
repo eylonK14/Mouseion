@@ -139,6 +139,31 @@ async def test_http_error_is_surfaced_not_retried(settings) -> None:
     assert calls["n"] == 1
 
 
+async def test_transport_error_is_retried_before_nonstream_response(settings) -> None:
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise httpx.ConnectError("temporary connection failure", request=request)
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": "recovered"}}]},
+        )
+
+    client = LLMClient(
+        settings,
+        client=httpx.AsyncClient(
+            transport=httpx.MockTransport(handler), base_url="https://openrouter.test/api/v1"
+        ),
+    )
+
+    answer = await client.complete_text(task=LLMTask.QA, system="system", user="user")
+
+    assert answer == "recovered"
+    assert calls["n"] == 2
+
+
 async def test_empty_content_is_an_error(settings) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"choices": [{"message": {"content": ""}}]})
@@ -152,3 +177,106 @@ async def test_empty_content_is_an_error(settings) -> None:
 
     with pytest.raises(LLMError, match="no content"):
         await call(client)
+
+
+async def test_stream_text_yields_tokens_and_captures_openrouter_usage(settings) -> None:
+    requests: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            text=(
+                'data: {"model":"provider/qa","choices":[{"delta":{"content":"hello "}}]}\n\n'
+                'data: {"model":"provider/qa","choices":[{"delta":{"content":"world"}}]}\n\n'
+                'data: {"model":"provider/qa","choices":[],"usage":'
+                '{"prompt_tokens":7,"completion_tokens":2,"total_tokens":9}}\n\n'
+                "data: [DONE]\n\n"
+            ),
+        )
+
+    client = LLMClient(
+        settings,
+        client=httpx.AsyncClient(
+            transport=httpx.MockTransport(handler), base_url="https://openrouter.test/api/v1"
+        ),
+    )
+    stream = client.stream_text(
+        task=LLMTask.QA,
+        messages=[{"role": "user", "content": "say hello"}],
+    )
+
+    assert "".join([token async for token in stream]) == "hello world"
+    assert requests[0]["stream"] is True
+    assert requests[0]["stream_options"] == {"include_usage": True}
+    assert stream.metrics.model == "provider/qa"
+    assert (
+        stream.metrics.prompt_tokens,
+        stream.metrics.completion_tokens,
+        stream.metrics.total_tokens,
+    ) == (7, 2, 9)
+
+
+async def test_stream_retries_transport_error_before_first_token(settings) -> None:
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise httpx.ConnectError("temporary connection failure", request=request)
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            text='data: {"choices":[{"delta":{"content":"recovered"}}]}\n\n',
+        )
+
+    client = LLMClient(
+        settings,
+        client=httpx.AsyncClient(
+            transport=httpx.MockTransport(handler), base_url="https://openrouter.test/api/v1"
+        ),
+    )
+    stream = client.stream_text(
+        task=LLMTask.QA,
+        messages=[{"role": "user", "content": "say hello"}],
+    )
+
+    assert "".join([token async for token in stream]) == "recovered"
+    assert calls["n"] == 2
+
+
+async def test_stream_does_not_retry_after_first_token(settings) -> None:
+    calls = {"n": 0}
+
+    class BrokenAfterToken(httpx.AsyncByteStream):
+        async def __aiter__(self):  # noqa: ANN202
+            yield b'data: {"choices":[{"delta":{"content":"partial"}}]}\n\n'
+            raise httpx.ReadError("connection lost during answer")
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            stream=BrokenAfterToken(),
+        )
+
+    client = LLMClient(
+        settings,
+        client=httpx.AsyncClient(
+            transport=httpx.MockTransport(handler), base_url="https://openrouter.test/api/v1"
+        ),
+    )
+    stream = client.stream_text(
+        task=LLMTask.QA,
+        messages=[{"role": "user", "content": "say hello"}],
+    )
+    tokens: list[str] = []
+
+    with pytest.raises(LLMError, match="connection lost during answer"):
+        async for token in stream:
+            tokens.append(token)
+
+    assert tokens == ["partial"]
+    assert calls["n"] == 1

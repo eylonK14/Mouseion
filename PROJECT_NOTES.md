@@ -5,7 +5,8 @@ that are not obvious from the code, and the exact seams the next phase should
 use. One section per phase, newest last.
 
 * [Phase 1 — foundation](#phase-1--foundation) (schema, ingest, bare list view)
-* [Phase 2 — search & browse UI](#phase-2--search--browse-ui) (current)
+* [Phase 2 — search & browse UI](#phase-2--search--browse-ui)
+* [Phase 3 — grounded QA](#phase-3--grounded-qa) (current)
 
 ---
 
@@ -468,3 +469,164 @@ render through rather than adding a CDN parser.
 **Do not** add a second HTTP client, a second templates environment, or a
 second way to talk to the API. `services/llm.py`, `api/ui.py::get_templates`,
 and `Mouseion.api` are the single instances of each.
+
+---
+
+# Phase 3 — grounded QA
+
+Mouseion now answers grounded questions over the collection, a topic subtree,
+or one paper. Open WebUI remains a stock chat surface: its two Pipe Functions
+only manage scope and relay the backend's SSE stream. The paper detail page has
+both an Open WebUI handoff and an inline no-context-switch question box.
+
+## 1. What was added
+
+```
+backend/migrations/versions/0002_qa_log.py
+backend/src/mouseion/
+  api/qa.py                 collection + paper SSE; title-resolution helper
+  services/qa.py            hybrid retrieval, grounding, budgets, citations/log
+  services/llm.py           OpenRouter streaming + aggregate token telemetry
+  services/prompts.py       tree-navigation + grounded synthesis prompts
+pipes/
+  library_qa.py             📚 Paper Library wrapper
+  single_paper.py           📄 Single Paper wrapper
+  common.py                 hot-reloaded tag/lock/SSE transport implementation
+frontend/
+  templates/partials/paper_detail.html   enabled handoff + inline QA form
+  static/app.js                         authenticated SSE rendering
+```
+
+Every QA setting is environment-backed and listed in `.env.example`:
+`QA_CANDIDATE_K` (8), `QA_MAX_NAVIGATIONS` (4),
+`QA_SECTIONS_PER_PAPER` (3), and hard tree/per-paper/total context plus history
+count/character budgets.
+
+## 2. Retrieval and grounding decisions
+
+**Stage 1 is true hybrid retrieval.** The question is embedded by the same
+cached local `Embedder` ingest uses. vec0 produces paper ids ordered by
+distance; FTS5 independently preserves literal/acronym/author matches. The two
+rank lists are merged with reciprocal-rank fusion (`k=60`) so their unrelated
+score scales never get mixed directly.
+
+**Topic scopes are controlled taxonomy subtrees.** `[topic:Cryptography]` and
+numeric ids resolve through the existing case-insensitive taxonomy service.
+Because migration 0001's vec0 table has no topic metadata column, a scoped
+query asks vec0 for the full distance ordering, then filters it through the
+cycle-safe descendant id set. That is deliberate: filtering a global top 8
+would miss an in-scope paper ranked ninth overall.
+
+**Stage 2 is a bounded MODEL_QA operation.** `tree_indexer.navigate` retains
+its tree/question/limit seam but is now async and asks the configured QA model
+for validated stored node ids. At most `QA_MAX_NAVIGATIONS` candidate papers
+reach this step. Bad/invented ids are dropped; an empty valid selection falls
+back to the old lexical ranker. PDFs are re-extracted only for the selected
+page ranges; missing PDF/tree data falls back to stored full text/abstract.
+
+**The budget removes papers before mutilating evidence.** Each paper is
+bounded first. If the total is still too large, the lowest RRF score is evicted
+until it fits. Only when one paper alone exceeds the hard total cap is that
+paper's final section trimmed. Tests pin the weakest-first behavior.
+
+**Grounding is enforced twice.** `qa/v1` tells the synthesizer that excerpts
+are data, prior chat is not evidence, citations must be exact
+`[PaperTitle §Section]`, missing answers must say “The answer is not in your
+library,” and disagreements must remain disagreements. After streaming, a
+deterministic citation check flags every cited title that was absent from the
+actual context; warnings ship in the final SSE metadata and `qa_log`.
+
+## 3. API, pipes, and UI contracts
+
+- `POST /api/qa/collection`: `question` or a messages-only conversation plus
+  optional `topic` (id or exact name). Streams `metadata`, `token`, `done`, and
+  readable `error` SSE events.
+- `POST /api/qa/paper/{id}`: same conversation contract, hard-scoped to one
+  paper.
+- `POST /api/qa/paper/resolve`: backend-owned fuzzy title resolution for the
+  thin single-paper pipe. A clear hit must exceed both an absolute and a
+  runner-up margin; otherwise the pipe lists choices.
+- Initial/final metadata contains consulted paper ids, exact titles, RRF
+  scores, exact section labels, and a nested frozen `SearchHit` card payload
+  built through `api/search.py::to_hits` (one paper query plus one batched topic
+  query). Final metadata also carries citation warnings and the `qa_log` id.
+- Open WebUI function ids are `paper_library` and `single_paper`. The latter
+  finds the first explicit `[paper:N]` anywhere in retained user messages, so
+  the lock survives follow-ups. If there is no tag, the first user message is
+  resolved once deterministically on every request from retained history.
+- The detail button uses Open WebUI's `model` and `q` URL parameters. The
+  inline form stays on the paper page, calls the same paper endpoint through
+  `Mouseion.api`, and renders tokens with the existing escape-first Markdown
+  renderer.
+
+Installation and Valve configuration are exact in `pipes/README.md`. The
+compose bind mount is `/app/backend/data/mouseion-pipes`; installed wrappers
+reload `common.py` on every request, so transport edits are live without an
+image rebuild.
+
+## 4. Cost visibility
+
+Migration `0002` adds `qa_log`. One completed/failed stream records scope,
+paper/topic, configured/returned model, aggregate prompt/completion/total
+tokens across navigation retries and synthesis, end-to-end latency,
+candidate/navigation counts, consulted-section JSON, citation warnings, and a
+readable error. Streaming requests ask OpenRouter for the final usage chunk;
+providers that omit it still record the model, call, and latency with zero
+token fields instead of fabricating counts.
+
+## 5. Verification and known limits
+
+- Baseline before edits: **197 passed**.
+- Required focused coverage includes RRF, real vec0 topic restriction,
+  weakest-first context eviction, MODEL_QA tree selection, citation post-check,
+  all specified pipe tag cases, conversation lock persistence, title
+  resolution, multi-paper metadata, empty-library abstention, SSE, prompt
+  golden, and `qa_log` usage.
+- The complete suite is run with a workspace-local pytest temp directory on
+  this Windows sandbox; AppData temp is not writable here. Final result:
+  **222 passed, 1 third-party Starlette/httpx deprecation warning**.
+- Docker Desktop's CLI is not on this shell's `PATH`, but its explicit binary
+  path was used for a live compose smoke test. API, worker, Redis, and Open
+  WebUI are healthy; the API image contains the retry path, the mounted pipe
+  contains the tag-only lock response, and the served JavaScript contains no
+  built-in paper question.
+- Semantic retrieval intentionally has no universal distance cutoff: embedding
+  distance calibration varies by the configured local model. For a weak
+  shortlist, the synthesis prompt must abstain based on the excerpts. An empty
+  shortlist is short-circuited to the exact abstention sentence without paying
+  for synthesis.
+
+### Runtime hardening (2026-08-23)
+
+- The paper-detail Open WebUI handoff now sends only `[paper:{id}]`. Open WebUI
+  auto-submits its `q` URL parameter, so the Single Paper pipe acknowledges the
+  lock without an LLM call and lets the owner write the first actual question.
+- The shared OpenRouter client retries transient `httpx` transport failures up
+  to `LLM_MAX_ATTEMPTS`, discarding its owned connection pool between attempts.
+  Streaming retries are allowed only before the first answer token, preventing
+  duplicate partial answers when a connection fails mid-stream.
+- Tag-only scope messages are removed from forwarded chat history after their
+  lock is captured, so follow-ups never send an empty `QAMessage` to the API.
+
+## 6. Phase 4 hook points
+
+**Do not duplicate paper grounding.** Call
+`services/qa.py::gather_grounding_material_for_paper(conn, paper_id, question,
+client=..., navigate_tree=...)`. Its `PaperGrounding` return carries the exact
+title, both stored summaries, and `SectionGrounding` values with section text
+and optional page bounds. Use `navigate_tree=False` when Phase 4 needs a cheap
+summary/full-text rubric seed before a question exists.
+
+**Tree access remains isolated.** Phase 4 should continue through
+`tree_indexer.load_tree` / async `navigate`; never parse PageIndex JSON or
+import PageIndex directly.
+
+**Sessions already have a home.** `test_sessions` from migration 0001 stores
+`paper_id`, transcript, rubric, score, and gaps. Add a service/repository around
+that table; do not put examiner state in a pipe or add a parallel store.
+
+**Model and prompt seams are unchanged.** Add grading/examiner prompts only in
+`services/prompts.py`, route calls through `LLMTask.GRADING` / the one
+`LLMClient`, and use the configured structured-output validation retry. The
+still-disabled `[test:{id}]` detail-button data contract is reserved for the
+Phase 4 examiner Pipe Function.

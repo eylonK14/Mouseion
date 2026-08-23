@@ -140,10 +140,13 @@
   // ------------------------------------------------------------------ api
   function api(path, options) {
     options = options || {};
+    var raw = Boolean(options.raw);
     var headers = Object.assign({}, options.headers || {}, {
       Authorization: "Bearer " + M.token(),
     });
-    return fetch(path, Object.assign({}, options, { headers })).then(function (res) {
+    var fetchOptions = Object.assign({}, options, { headers: headers });
+    delete fetchOptions.raw;
+    return fetch(path, fetchOptions).then(function (res) {
       if (!res.ok) {
         return res.text().then(function (body) {
           var detail = body;
@@ -155,10 +158,112 @@
           throw new Error(res.status + " — " + String(detail).slice(0, 200));
         });
       }
+      if (raw) return res;
       return res.status === 204 ? null : res.json();
     });
   }
   M.api = api;
+
+  // ----------------------------------------------------------- grounded QA
+  M.openPaperChat = function (button) {
+    try {
+      var url = new URL(button.dataset.openwebuiUrl, window.location.href);
+      url.searchParams.set("model", "single_paper");
+      // Open WebUI auto-submits `q`; send only the scope lock so the pipe can
+      // select the paper without inventing the user's first real question.
+      url.searchParams.set("q", button.dataset.chatPrefix);
+      window.open(url.toString(), "_blank", "noopener,noreferrer");
+    } catch (err) {
+      M.toast("Open WebUI URL is invalid: " + err.message, "error");
+    }
+  };
+
+  function parseSseBlock(block) {
+    var event = "message";
+    var data = "";
+    block.split(/\r?\n/).forEach(function (line) {
+      if (line.indexOf("event:") === 0) event = line.slice(6).trim();
+      if (line.indexOf("data:") === 0) data += line.slice(5).trim();
+    });
+    if (!data) return null;
+    try {
+      return { event: event, data: JSON.parse(data) };
+    } catch (err) {
+      return null;
+    }
+  }
+
+  async function streamQuickAnswer(form) {
+    var input = form.elements.question;
+    var button = form.querySelector('button[type="submit"]');
+    var answer = form.parentElement.querySelector("[data-quick-qa-answer]");
+    var sources = form.parentElement.querySelector("[data-quick-qa-sources]");
+    var question = (input.value || "").trim();
+    if (!question) return;
+
+    button.disabled = true;
+    answer.classList.remove("hidden");
+    answer.textContent = "Looking through the paper…";
+    sources.classList.add("hidden");
+    var accumulated = "";
+    try {
+      var response = await api("/api/qa/paper/" + form.dataset.paperId, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+        body: JSON.stringify({ question: question }),
+        raw: true,
+      });
+      if (!response.body) throw new Error("The browser did not provide a response stream.");
+      var reader = response.body.getReader();
+      var decoder = new TextDecoder();
+      var buffer = "";
+      while (true) {
+        var chunk = await reader.read();
+        buffer += decoder.decode(chunk.value || new Uint8Array(), { stream: !chunk.done });
+        var blocks = buffer.split(/\r?\n\r?\n/);
+        buffer = blocks.pop() || "";
+        blocks.forEach(function (block) {
+          var parsed = parseSseBlock(block);
+          if (!parsed) return;
+          if (parsed.event === "token") {
+            accumulated += parsed.data.text || "";
+            answer.innerHTML = M.renderMarkdown(accumulated);
+          } else if (parsed.event === "done") {
+            var papers = parsed.data.consulted_papers || [];
+            var labels = papers.map(function (paper) {
+              return paper.title + " — " + (paper.sections || []).join(", ");
+            });
+            if (parsed.data.citation_warnings && parsed.data.citation_warnings.length) {
+              labels.push("Citation warning: " + parsed.data.citation_warnings.join(", "));
+            }
+            sources.textContent = labels.join(" · ");
+            sources.classList.toggle("hidden", !labels.length);
+          } else if (parsed.event === "error") {
+            throw new Error(parsed.data.detail || "QA stream failed");
+          }
+        });
+        if (chunk.done) break;
+      }
+      if (!accumulated) answer.textContent = "No answer was returned.";
+    } catch (err) {
+      answer.textContent = err.message;
+      M.toast("Quick question failed: " + err.message, "error");
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  document.addEventListener("click", function (evt) {
+    var button = evt.target.closest("[data-open-paper-chat]");
+    if (button) M.openPaperChat(button);
+  });
+
+  document.addEventListener("submit", function (evt) {
+    var form = evt.target.closest("[data-quick-qa-form]");
+    if (!form) return;
+    evt.preventDefault();
+    streamQuickAnswer(form);
+  });
 
   // --------------------------------------------------------------- ingest
   // A job is a poll loop with a terminal state, not something to swap into the

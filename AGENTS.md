@@ -18,23 +18,24 @@ accurate when a change makes them stale.
 
 ## Current state and roadmap
 
-Phases 1 and 2 are implemented:
+Phases 1 through 3 are implemented:
 
 - Foundation: SQLite schema, PDF/arXiv ingestion, resumable arq jobs, taxonomy,
   summaries, PageIndex-compatible trees, paper embeddings, and a basic API.
 - Library UI: FTS5 search, descendant-aware topic browsing, paper detail,
   reading status, notes, taxonomy editing, and responsive HTMX/Jinja pages.
+- Grounded QA: hybrid paper retrieval, bounded tree navigation, collection and
+  single-paper SSE, Open WebUI Pipe Functions, inline paper QA, and `qa_log`
+  model/token/latency visibility.
 
 The next planned work is:
 
-1. Phase 3: grounded QA using paper-level vector shortlist followed by tree
-   navigation, plus the Open WebUI QA pipe.
-2. Phase 4: explain-it-back examiner conversations, rubric grading, gap
+1. Phase 4: explain-it-back examiner conversations, rubric grading, gap
    reporting, and test history.
-3. Phase 5: phone/PWA capture, deployment hardening, vendored frontend assets,
+2. Phase 5: phone/PWA capture, deployment hardening, vendored frontend assets,
    non-root services, and backups.
 
-Do not describe planned Phase 3-5 behavior as already implemented.
+Do not describe planned Phase 4-5 behavior as already implemented.
 
 ## Repository map
 
@@ -58,11 +59,14 @@ Do not describe planned Phase 3-5 behavior as already implemented.
   and model-staleness metadata.
 - `backend/src/mouseion/services/search.py`: safe FTS5 query building, filters,
   ranking, snippets, sorting, and pagination.
+- `backend/src/mouseion/services/qa.py`: hybrid shortlist, tree-grounding,
+  context budgets, citation checks, title resolution, and the Phase 4 paper
+  grounding seam.
 - `backend/src/mouseion/services/taxonomy.py`: controlled hierarchical topics,
   cycle-safe traversal/editing, split/merge/delete behavior, and paper-topic
   links.
 - `backend/migrations/`: Alembic schema. Migration `0001` includes tables and
-  virtual tables anticipated through test mode.
+  virtual tables anticipated through test mode; `0002` adds QA cost logging.
 - `backend/tests/`: pytest suite; LLMs and embeddings are mocked where needed.
 - `frontend/templates/`: public data-free page shells and authenticated HTMX
   fragments, rendered by the backend.
@@ -70,8 +74,8 @@ Do not describe planned Phase 3-5 behavior as already implemented.
   hooks, job polling, PDF loading, toasts, taxonomy interactions, and the small
   escape-first Markdown renderer.
 - `frontend/static/app.css`: application styling and minimal offline fallback.
-- `pipes/`: currently a stub for thin Open WebUI transport adapters in Phases
-  3 and 4. Prompts and LLM calls must remain in the backend.
+- `pipes/`: thin Open WebUI Pipe Functions for collection and single-paper QA.
+  Prompts and LLM calls remain in the backend.
 - `data/`: runtime SQLite database, content-addressed PDFs, and tree JSON. Treat
   it as user data, not source code; never delete or rewrite it casually.
 - `docker-compose.yml`: Redis, one-shot migrations, API, worker, and optional
@@ -137,18 +141,15 @@ Do not describe planned Phase 3-5 behavior as already implemented.
 - Reuse `Mouseion.renderMarkdown`; it is an intentionally small escape-first
   subset and avoids another CDN/parser dependency.
 
-## Phase 3 and 4 extension seams
+## Phase 4 extension seams
 
-- QA retrieval should shortlist papers through `paper_vectors`, then navigate
-  the selected papers' stored trees through `load_tree`/`navigate` in
-  `tree_indexer.py`. Keep those signatures stable where practical.
-- Hybrid/retrieval results should produce `SearchHit`-compatible objects and
-  reuse `api/search.py::to_hits` to avoid N+1 topic queries.
-- The disabled paper-detail buttons already expose
-  `data-chat-prefix="[paper:{id}]"` and `[test:{id}]` with the configured Open
-  WebUI URL. Existing tests pin this contract.
-- Open WebUI pipes are thin authenticated transport shims to `http://api:8000`.
-  They must not contain prompts, retrieval logic, grading logic, or LLM calls.
+- Reuse `services/qa.py::gather_grounding_material_for_paper` for stored
+  summaries and question-relevant tree sections; do not fork paper grounding.
+- Open WebUI pipes remain thin authenticated transport shims to
+  `http://api:8000`. They must not contain prompts, retrieval logic, grading
+  logic, or LLM calls.
+- The disabled paper-detail examiner button still exposes
+  `data-chat-prefix="[test:{id}]"` with the configured Open WebUI URL.
 - The `test_sessions` table already holds transcript, rubric, score, and gaps
   for Phase 4.
 
