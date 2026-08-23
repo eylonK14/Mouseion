@@ -1,4 +1,4 @@
-# Mouseion — Phases 1-2
+# Mouseion — Phases 1-3
 #
 # Recipes use a leading TAB (GNU make). If you are on Windows without make,
 # every target's body is a plain docker compose / pytest command you can paste;
@@ -8,7 +8,7 @@ SHELL := /bin/sh
 COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
-.PHONY: help up down build logs ps migrate revision test test-local shell clean env
+.PHONY: help up webui down build logs ps migrate revision test test-local shell clean env
 
 help: ## Show available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -22,6 +22,10 @@ up: env ## Build if needed, run migrations, start the stack
 	@echo "api:      http://localhost:$${API_PORT:-8000}"
 	@echo "library:  http://localhost:$${API_PORT:-8000}/"
 	@echo "taxonomy: http://localhost:$${API_PORT:-8000}/taxonomy"
+
+webui: env ## Start the optional Open WebUI paper-QA chat surface
+	$(COMPOSE) --profile webui up -d open-webui
+	@echo "open webui: http://localhost:$${WEBUI_PORT:-3000}"
 
 down: ## Stop the stack (keeps ./data and volumes)
 	$(COMPOSE) down

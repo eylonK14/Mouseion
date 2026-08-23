@@ -29,9 +29,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
+from pydantic import BaseModel, Field
+
 from mouseion.config import Settings, get_settings
+from mouseion.services.llm import LLMClient, LLMMetrics, LLMTask, get_llm_client
 from mouseion.services.pdfs import ExtractedText, extract_outline
-from mouseion.services.prompts import extract_section_headers
+from mouseion.services.prompts import build_tree_navigation_prompt, extract_section_headers
 
 log = logging.getLogger(__name__)
 
@@ -399,13 +402,57 @@ def load_tree(
     return load_tree_by_sha(row["sha256"], settings)
 
 
-def navigate(tree: TreeDocument, question: str, limit: int = 5) -> list[TreeNode]:
-    """Rank tree nodes against a question.
+class TreeNavigationSelection(BaseModel):
+    node_ids: list[str] = Field(default_factory=list, max_length=10)
 
-    Phase 1 scores lexical overlap on title + summary. Phase 3 replaces this
-    body with LLM-driven descent (MODEL_QA) — the signature is the contract, so
-    callers written now keep working.
+
+async def navigate(
+    tree: TreeDocument,
+    question: str,
+    limit: int = 5,
+    *,
+    client: LLMClient | None = None,
+    metrics: LLMMetrics | None = None,
+    text_budget: int | None = None,
+) -> list[TreeNode]:
+    """Use MODEL_QA to select relevant nodes from a stored tree.
+
+    The first three parameters preserve the Phase 1 seam. Phase 3 makes the
+    operation asynchronous because tree descent is now a budgeted LLM call.
+    Invalid ids are ignored; if a model selects nothing, the old lexical ranker
+    remains a deterministic fallback rather than returning an empty paper.
     """
+    nodes = list(tree.iter_nodes())
+    if not nodes or not question.strip() or limit <= 0:
+        return []
+
+    settings = get_settings()
+    prompt = build_tree_navigation_prompt(
+        question=question,
+        nodes=[(node.node_id, node.title, node.summary) for node in nodes],
+        text_budget=text_budget or settings.qa_tree_budget_chars,
+    )
+    selection = await (client or get_llm_client()).complete_json(
+        task=LLMTask.QA,
+        system=prompt.system,
+        user=prompt.user,
+        output_model=TreeNavigationSelection,
+        metrics=metrics,
+    )
+    by_id = {node.node_id: node for node in nodes}
+    selected: list[TreeNode] = []
+    seen: set[str] = set()
+    for node_id in selection.node_ids:
+        if node_id in by_id and node_id not in seen:
+            selected.append(by_id[node_id])
+            seen.add(node_id)
+        if len(selected) >= limit:
+            break
+    return selected or _navigate_lexically(tree, question, limit)
+
+
+def _navigate_lexically(tree: TreeDocument, question: str, limit: int) -> list[TreeNode]:
+    """Phase 1's ranker, retained only as a no-selection fallback."""
     terms = {t for t in _tokenize(question) if len(t) > 2}
     if not terms:
         return []

@@ -38,6 +38,10 @@ pip-delete-this-directory.txt
 
 # Unit test / coverage reports
 htmlcov/
+# Workspace-local test/browser harnesses (the desktop sandbox cannot write to
+# the system temp directory).
+/backend/.codex-test*/
+/backend/.codex-browser-test/
 .tox/
 .nox/
 .coverage
