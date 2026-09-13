@@ -209,6 +209,14 @@ class LLMClient:
             await self._client.aclose()
             self._client = None
 
+    async def check_reachable(self, *, timeout_seconds: int = 5) -> None:
+        """Verify OpenRouter credentials/connectivity without making a model call."""
+        try:
+            response = await self.client.get("/models", timeout=timeout_seconds)
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise LLMError(f"OpenRouter health check failed: {exc}") from exc
+
     async def _prepare_transport_retry(
         self, exc: httpx.TransportError, attempt: int, attempts: int
     ) -> None:

@@ -61,11 +61,12 @@ explains a paper back to an LLM examiner and gets graded.
 - Tests: pytest; every phase ships tests for its core logic (LLM calls
   mocked; golden-file tests for prompt builders).
 - Config via environment only (.env.example kept current).
-- One docker-compose.yml at root runs everything.
+- `docker-compose.yml` is the development stack; `docker-compose.prod.yml`
+  adds the hardened named-volume, loopback-only production topology.
 
-## Phase roadmap (each phase = one Claude Code session)
-1. Foundation: repo, schema, ingest pipeline, bare list view
-2. Search & browse UI (FTS5, topic tree, paper detail, reading workflow)
-3. QA: paper-level vectors + two-stage retrieval + Open WebUI pipes
-4. Test mode (examiner pipe + rubric grading + history)
-5. Phone capture (PWA share target), deployment hardening, backups
+## Completed phase roadmap
+1. Foundation: repo, schema, ingest pipeline, bare list view — complete
+2. Search & browse UI (FTS5, topic tree, paper detail, reading workflow) — complete
+3. QA: paper-level vectors + two-stage retrieval + Open WebUI pipes — complete
+4. Test mode (examiner pipe + rubric grading + history) — complete
+5. Phone capture (PWA share target), deployment hardening, backups — complete

@@ -20,6 +20,7 @@ from typing import Literal, Sequence
 
 from mouseion.config import Settings, get_settings
 from mouseion.db import load_sqlite_vec, serialize_f32
+from mouseion.observability import current_request_id
 from mouseion.services.embeddings import get_embedder
 from mouseion.services.llm import LLMClient, LLMMetrics
 from mouseion.services.pdfs import extract_text
@@ -596,8 +597,8 @@ def record_qa_log(
         INSERT INTO qa_log (
             scope, paper_id, topic_id, model, prompt_tokens, completion_tokens,
             total_tokens, latency_ms, candidate_count, navigation_count,
-            consulted_papers_json, citation_warnings_json, error
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            consulted_papers_json, citation_warnings_json, error, request_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             prepared.scope,
@@ -613,6 +614,7 @@ def record_qa_log(
             json.dumps(prepared.metadata()["consulted_papers"], ensure_ascii=False),
             json.dumps(list(citation_issues), ensure_ascii=False),
             error,
+            current_request_id(),
         ),
     )
     return int(cursor.lastrowid)

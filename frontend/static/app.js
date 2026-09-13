@@ -22,6 +22,14 @@
   };
   window.Mouseion = M;
 
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", function () {
+      navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(function (err) {
+        console.warn("Mouseion service worker registration failed", err);
+      });
+    });
+  }
+
   function $(id) {
     return document.getElementById(id);
   }
@@ -287,12 +295,14 @@
   // Each submitted item owns one toast for its whole life — created *before*
   // the POST, because that request can block (the API waits on the queue) and
   // silence there reads as "the button did nothing".
-  function watchJob(jobId, label, node) {
+  function watchJob(jobId, label, node, options) {
     var delay = 700;
+    options = options || {};
 
     function tick() {
       api("/api/jobs/" + jobId)
         .then(function (job) {
+          if (options.onUpdate) options.onUpdate(job);
           if (job.state === "done") {
             setToastText(
               node,
@@ -304,10 +314,12 @@
             }, 4000);
             M.refresh();
             M.refreshTree();
+            if (options.onDone) options.onDone(job);
             return;
           }
           if (job.state === "failed") {
             setToastText(node, label + " — failed: " + (job.error || "unknown error"), "error");
+            if (options.onFailed) options.onFailed(job);
             return;
           }
           setToastText(node, label + " — " + job.state + "…", "info");
@@ -316,6 +328,7 @@
         })
         .catch(function (err) {
           setToastText(node, label + " — " + err.message, "error");
+          if (options.onError) options.onError(err);
         });
     }
     tick();
@@ -323,8 +336,13 @@
 
   /** Follow an already-submitted job to its terminal state. Phase 5's share
    *  target hands off here after posting from the service worker. */
-  M.watchJob = function (jobId, label) {
-    watchJob(jobId, label, M.toast(label + " — queued…", "info", { sticky: true }));
+  M.watchJob = function (jobId, label, options) {
+    watchJob(
+      jobId,
+      label,
+      M.toast(label + " — queued…", "info", { sticky: true }),
+      options
+    );
   };
 
   function submitIngest(label, options) {
@@ -726,7 +744,7 @@
     on($("token-open"), "click", function () {
       M.openGate();
     });
-    if (!M.token()) M.openGate();
+    if (!M.token() && !document.body.dataset.pairingPage) M.openGate();
 
     // Upload dialog + drag-and-drop.
     on($("upload-open"), "click", function () {
@@ -793,6 +811,45 @@
     });
 
     on($("merge-confirm"), "click", M.doMerge);
+
+    document.addEventListener("click", function (evt) {
+      var pairingButton = evt.target.closest("#pairing-create");
+      if (pairingButton) {
+        pairingButton.disabled = true;
+        pairingButton.textContent = "Creating…";
+        api("/api/pairing", { method: "POST" }).then(function (pairing) {
+          $("pairing-qr").src = pairing.qr_data_url;
+          $("pairing-link").href = pairing.pair_url;
+          $("pairing-link").textContent = pairing.pair_url;
+          $("pairing-expiry").textContent = "Expires " + pairing.expires_at;
+          $("pairing-result").classList.remove("hidden");
+          pairingButton.textContent = "Create a new QR";
+          pairingButton.disabled = false;
+        }).catch(function (error) {
+          M.toast(error.message, "error");
+          pairingButton.textContent = "Create pairing QR";
+          pairingButton.disabled = false;
+        });
+        return;
+      }
+      var refresh = evt.target.closest("[data-admin-refresh]");
+      if (refresh) {
+        htmx.trigger(document.body, "mouseion:admin");
+        return;
+      }
+      var retry = evt.target.closest("[data-retry-job]");
+      if (!retry) return;
+      retry.disabled = true;
+      api("/api/jobs/" + retry.dataset.retryJob + "/retry", { method: "POST" })
+        .then(function () {
+          M.toast("Job queued for retry.", "ok");
+          htmx.trigger(document.body, "mouseion:admin");
+        })
+        .catch(function (error) {
+          retry.disabled = false;
+          M.toast(error.message, "error");
+        });
+    });
 
     M.bindMerge(document);
   });

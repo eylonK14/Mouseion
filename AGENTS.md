@@ -16,9 +16,9 @@ starting phase work; it records what is implemented, deliberate decisions,
 known gaps, verification history, and exact extension seams. Keep both documents
 accurate when a change makes them stale.
 
-## Current state and roadmap
+## Current state
 
-Phases 1 through 4 are implemented:
+All five planned phases are implemented:
 
 - Foundation: SQLite schema, PDF/arXiv ingestion, resumable arq jobs, taxonomy,
   summaries, PageIndex-compatible trees, paper embeddings, and a basic API.
@@ -30,13 +30,10 @@ Phases 1 through 4 are implemented:
 - Test mode: persisted EXPLAIN → PROBE → VERDICT sessions, grounded probes,
   validated rubric grading, Open WebUI voice-ready examiner transport,
   understanding history, and opt-in `understood` status offers.
-
-The next planned work is:
-
-1. Phase 5: phone/PWA capture, deployment hardening, vendored frontend assets,
-   non-root services, and backups.
-
-Do not describe planned Phase 5 behavior as already implemented.
+- Production: installable phone PWA/share target, single-use QR pairing,
+  vendored browser assets, full health/admin views, JSON request tracing,
+  rate-limited ingest, non-root production services, Tailscale deployment,
+  consistent snapshots/restore drills, and index maintenance commands.
 
 ## Repository map
 
@@ -58,6 +55,9 @@ Do not describe planned Phase 5 behavior as already implemented.
   creation, persistence, loading, and the Phase 3 navigation seam.
 - `backend/src/mouseion/services/embeddings.py`: one local embedding per paper
   and model-staleness metadata.
+- `backend/src/mouseion/services/health.py`: full local/external startup checks.
+- `backend/src/mouseion/maintenance.py`: backup, restore-drill, re-embedding,
+  FTS rebuild, and command-line health entry points.
 - `backend/src/mouseion/services/search.py`: safe FTS5 query building, filters,
   ranking, snippets, sorting, and pagination.
 - `backend/src/mouseion/services/qa.py`: hybrid shortlist, tree-grounding,
@@ -71,7 +71,8 @@ Do not describe planned Phase 5 behavior as already implemented.
   links.
 - `backend/migrations/`: Alembic schema. Migration `0001` includes tables and
   virtual tables anticipated through test mode; `0002` adds QA cost logging;
-  `0003` adds resumable examiner state to `test_sessions`.
+  `0003` adds resumable examiner state to `test_sessions`; `0004` adds
+  request tracing and hashed, single-use pairing tokens.
 - `backend/tests/`: pytest suite; LLMs and embeddings are mocked where needed.
 - `frontend/templates/`: public data-free page shells and authenticated HTMX
   fragments, rendered by the backend.
@@ -79,13 +80,17 @@ Do not describe planned Phase 5 behavior as already implemented.
   hooks, job polling, PDF loading, toasts, taxonomy interactions, and the small
   escape-first Markdown renderer.
 - `frontend/static/app.css`: application styling and minimal offline fallback.
+- `frontend/static/manifest.webmanifest`, `sw.js`, `share.js`, and `pair.js`:
+  installable PWA capture, offline shell, Web Share Target, and device pairing.
 - `pipes/`: thin Open WebUI Pipe Functions for collection QA, single-paper QA,
   and test mode. Prompts, state transitions, grading, and LLM calls remain in
   the backend.
 - `data/`: runtime SQLite database, content-addressed PDFs, and tree JSON. Treat
   it as user data, not source code; never delete or rewrite it casually.
-- `docker-compose.yml`: Redis, one-shot migrations, API, worker, and optional
-  Open WebUI profile.
+- `docker-compose.yml`: development Redis, migrations, API, worker, and
+  optional Open WebUI profile.
+- `docker-compose.prod.yml`: hardened non-root deployment with named state,
+  healthchecks, limits, maintenance jobs, and loopback-only published ports.
 
 ## Architectural rules
 
@@ -147,16 +152,20 @@ Do not describe planned Phase 5 behavior as already implemented.
 - Reuse `Mouseion.renderMarkdown`; it is an intentionally small escape-first
   subset and avoids another CDN/parser dependency.
 
-## Phase 5 extension seams
+## Production and maintenance contracts
 
 - Phone clients can start, advance, and reload examiner sessions through the
   short authenticated `/api/test/*` contracts. Reloading by session id replays
   persisted state; do not move active state into a browser, pipe, or worker.
-- The share target should enqueue through the existing ingest API and hand
-  progress to `Mouseion.watchJob`; ingestion remains resumable and async.
+- The share target enqueues through the existing ingest API and hands progress
+  to `Mouseion.watchJob`; ingestion remains resumable and async.
 - Preserve test-session and reread page links when making the PDF reader more
   phone-native. `Mouseion.jumpToPdf` owns authenticated blob loading plus page
   fragments.
+- Pairing rows store only SHA-256 token hashes. Consumption is atomic,
+  single-use, expiring, and the public consume route is an exact narrow path.
+- Backups consist of a `VACUUM INTO` database plus the matching PDF/tree copy.
+  Never copy the live SQLite file or restore into the active volume in place.
 - Open WebUI pipes remain thin authenticated transport shims to
   `http://api:8000`. Voice/TTS is Open WebUI configuration, not backend or pipe
   code.
@@ -202,8 +211,9 @@ states, HTMX swaps, error toasts, refresh persistence, and narrow-phone layout.
   every setting the application reads.
 - `.env` contains secrets. Never print, commit, copy into docs, or expose its
   values. Use `.env.example` when inspecting configuration shape.
-- Common commands are `make up`, `make down`, `make logs`, `make migrate`, and
-  `make test`. Open WebUI is optional until its pipes exist:
+- Common commands are `make up`, `make down`, `make logs`, `make migrate`,
+  `make test`, `make backup`, `make restore-drill`, `make reembed`, and
+  `make reindex-fts`. Open WebUI remains optional:
   `docker compose --profile webui up -d`.
 - Preserve unrelated work in the working tree. Inspect `git status` before and
   after edits and do not overwrite or revert user changes.

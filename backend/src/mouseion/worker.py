@@ -27,6 +27,7 @@ import logging
 from typing import Any
 
 from mouseion.config import get_settings
+from mouseion.observability import configure_logging
 from mouseion.services.embeddings import get_embedder
 from mouseion.services.ingest import run_ingest
 from mouseion.services.llm import get_llm_client
@@ -50,7 +51,7 @@ ingest_task.__name__ = INGEST_TASK
 
 async def startup(ctx: dict[str, Any]) -> None:
     settings = get_settings()
-    logging.basicConfig(level=settings.log_level)
+    configure_logging(settings.log_level)
     settings.ensure_dirs()
 
     # Load the embedding model once per worker process, not once per job.

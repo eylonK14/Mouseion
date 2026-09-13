@@ -30,6 +30,7 @@ from mouseion.services.hashing import sha256_bytes
 from mouseion.services.jobs import JobKind, JobState, create_job, set_state
 from mouseion.services.jobs import attach as attach_job
 from mouseion.services.pdfs import NotAPdfError, pdf_path_for, store_pdf
+from mouseion.services.rate_limit import ingest_limiter
 from mouseion.services.taxonomy import (
     TopicNotFoundError,
     add_paper_topic,
@@ -154,6 +155,18 @@ async def ingest_paper(
     settings: Settings = Depends(get_settings),
 ) -> IngestAccepted:
     """Ingest a PDF upload (multipart) or a URL (JSON `{"url": ...}`)."""
+    client_key = request.client.host if request.client else "unknown"
+    retry_after = ingest_limiter.check(
+        client_key,
+        limit=settings.ingest_rate_limit_count,
+        window_seconds=settings.ingest_rate_limit_window_seconds,
+    )
+    if retry_after:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "ingest rate limit exceeded; try again shortly",
+            headers={"Retry-After": str(retry_after)},
+        )
     content_type = (request.headers.get("content-type") or "").lower()
 
     if content_type.startswith("multipart/form-data"):

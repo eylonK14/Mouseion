@@ -19,6 +19,8 @@ import uuid
 from enum import Enum
 from typing import Any
 
+from mouseion.observability import current_request_id
+
 
 class JobState(str, Enum):
     QUEUED = "queued"
@@ -54,8 +56,8 @@ _TOUCH = "updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"
 def create_job(conn: sqlite3.Connection, kind: JobKind | str, payload: dict[str, Any]) -> str:
     job_id = uuid.uuid4().hex
     conn.execute(
-        "INSERT INTO ingest_jobs (id, kind, payload_json) VALUES (?, ?, ?)",
-        (job_id, JobKind(kind).value, json.dumps(payload)),
+        "INSERT INTO ingest_jobs (id, kind, payload_json, request_id) VALUES (?, ?, ?, ?)",
+        (job_id, JobKind(kind).value, json.dumps(payload), current_request_id()),
     )
     return job_id
 

@@ -29,6 +29,17 @@ COPY tests ./tests
 
 RUN pip install --no-deps -e .
 
+# Production API, migrations, worker, and maintenance commands use this
+# unprivileged account. New named volumes inherit these ownership bits on first
+# mount; the development Compose file alone overrides the user for its legacy
+# host data bind mount.
+RUN addgroup --system --gid 10001 mouseion \
+    && adduser --system --uid 10001 --ingroup mouseion --home /app --no-create-home mouseion \
+    && mkdir -p /app/data /app/backups /app/.hf-cache \
+    && chown -R mouseion:mouseion /app/data /app/backups /app/.hf-cache
+
+USER mouseion
+
 EXPOSE 8000
 
 CMD ["uvicorn", "mouseion.main:app", "--host", "0.0.0.0", "--port", "8000"]

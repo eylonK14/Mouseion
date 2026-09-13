@@ -23,6 +23,7 @@ import httpx
 
 from mouseion.config import Settings, get_settings
 from mouseion.db import session
+from mouseion.observability import reset_request_id, set_request_id
 from mouseion.services import papers as papers_repo
 from mouseion.services.arxiv import ArxivMetadata, fetch_metadata, normalize_arxiv_url
 from mouseion.services.embeddings import build_embedding_source, get_embedder, store_embedding
@@ -168,6 +169,8 @@ async def _run(
     if job is None:
         raise IngestError(f"unknown job {job_id}")
 
+    request_token = set_request_id(str(job["request_id"] or job_id))
+
     outcome = IngestOutcome(job_id=job_id)
     bump_attempts(conn, job_id)
     payload = payload_of(job)
@@ -240,6 +243,7 @@ async def _run(
     finally:
         if owns_http:
             await client.aclose()
+        reset_request_id(request_token)
 
 
 async def _step_download(

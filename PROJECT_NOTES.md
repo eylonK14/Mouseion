@@ -1,13 +1,14 @@
-# Project notes — what exists, what doesn't, where the next phase plugs in
+# Project notes — complete system, decisions, and operating limits
 
 `CLAUDE.md` is the spec. This file is the delta: what was built, the decisions
-that are not obvious from the code, and the exact seams the next phase should
+that are not obvious from the code, and the stable seams future work should
 use. One section per phase, newest last.
 
 * [Phase 1 — foundation](#phase-1--foundation) (schema, ingest, bare list view)
 * [Phase 2 — search & browse UI](#phase-2--search--browse-ui)
 * [Phase 3 — grounded QA](#phase-3--grounded-qa)
-* [Phase 4 — test mode](#phase-4--test-mode) (current)
+* [Phase 4 — test mode](#phase-4--test-mode)
+* [Phase 5 — phone capture and production](#phase-5--phone-capture-and-production) (current)
 
 ---
 
@@ -805,3 +806,133 @@ turn ids for stronger retry idempotency, add a migration and enforce them in
 **Deployment hardening remains unchanged.** Vendor frontend assets, run
 services non-root, add backups for the SQLite/PDF/tree volume, and keep all
 three Open WebUI pipes as thin authenticated transports.
+
+---
+
+# Phase 5 — phone capture and production
+
+Mouseion is now a complete five-phase system. Phase 5 closes the phone-capture
+loop and adds the operational surfaces needed for a long-lived private
+deployment without changing the Phase 1–4 domain boundaries.
+
+## 1. Complete system map
+
+```text
+phone/desktop PWA ── HTTPS on the tailnet ──> FastAPI + Jinja/HTMX
+       │                                          │
+       │ share URL/text/PDF                       ├─ SQLite + FTS5 + sqlite-vec
+       │ QR device pairing                        ├─ content-addressed PDFs
+       │ QA/test deep links                       └─ stored paper trees
+       │
+       └──────────────── Open WebUI ── thin pipes ─┘
+                                                   │
+FastAPI ── arq ── Redis ── worker ── OpenRouter + local embeddings
+                                                   │
+nightly maintenance ── VACUUM INTO + PDF/tree snapshot ── off-site copy
+```
+
+The development stack remains in `docker-compose.yml`. The production stack is
+`docker-compose.prod.yml`: Redis, one-shot migrations, API, worker, optional
+Open WebUI, and an on-demand maintenance container. Mouseion data, Redis state,
+and Open WebUI state use named volumes; completed snapshots bind-mount to the
+host so restic/rsync and restore procedures do not depend on Docker internals.
+
+## 2. Phone capture and authentication
+
+- `manifest.webmanifest` registers Mouseion as a `multipart/form-data` Web
+  Share Target for title, text, URL, and one PDF. `sw.js` captures the browser's
+  POST, stages the values/file in IndexedDB, and redirects to the minimal
+  `/share` confirmation page. Normal shell resources are cache-first; GET API
+  requests are network-first; mutating API calls are never cached.
+- `sharing.py` extracts an arXiv link from arbitrary share-sheet prose before
+  falling back to the explicit URL. `/share` submits the exact existing
+  `POST /api/papers` contract and delegates progress/retry/deep-link behavior to
+  the extended `Mouseion.watchJob` callback seam.
+- The desktop admin page creates a short-lived random pairing token and a QR
+  data URI. Migration `0004` stores only its SHA-256 hash. The narrowly public
+  `/api/pairing/consume` transaction marks a valid row used before returning
+  the API token once; `/pair` removes the query string before making that call
+  and then uses the one existing browser token setter.
+- Shells remain public and data-free. `/ui/admin`, all library fragments, all
+  jobs, and the share extraction/ingest routes require bearer auth.
+
+## 3. Operations and durability
+
+- `observability.py` installs JSON logging in the API and worker. Incoming
+  `X-Request-ID` is validated or replaced, returned on the response, placed in
+  context, and persisted on `ingest_jobs`/`qa_log` by migration `0004`. URLs are
+  logged without query strings so pairing tokens are not copied into logs.
+- `/health/full` checks a rollback-only SQLite write plus `quick_check`, FTS
+  source/index counts, an actual local embedding and configured dimension,
+  PageIndex availability, free disk, and OpenRouter through the one existing
+  `LLMClient`. The authenticated admin fragment displays those checks with
+  queue counts, failed-job retries, recent request ids, and daily/model QA
+  token totals.
+- The ingest route uses a modest, process-local sliding-window limit per client
+  after auth and before multipart parsing. It is intentionally defense in
+  depth, not a distributed quota; Tailscale and the bearer token remain the
+  security boundary.
+- `maintenance.py backup` checkpoints WAL, creates a consistent database with
+  `VACUUM INTO`, copies PDFs/trees, writes a count manifest, atomically publishes
+  the dated directory, and retains the configured number of days. Dry-run does
+  no writes. `restore-drill` restores the latest snapshot to scratch, opens it
+  through the real DB layer, and runs the local full-health checks without
+  touching live data.
+- `make reembed` selects only missing/stale rows by stored model name;
+  `make reindex-fts` rebuilds FTS from the source tables. Restore and off-site
+  procedures are in `BACKUPS.md`; Tailscale Serve, Open WebUI, and the first-run
+  production checklist are in `DEPLOYMENT.md`.
+- Tailwind 3.4.17 is compiled and checked in, HTMX 2.0.4 is vendored, and the
+  production image runs as UID/GID 10001. Development alone overrides that
+  user for compatibility with the historical host `./data` bind mount. No
+  browser CDN or Node runtime is needed after checkout.
+
+## 4. Verification at handoff
+
+- Pre-change Phase 4 baseline: **240 passed**.
+- Phase 5 tests cover messy arXiv shares, authenticated extraction, expiring
+  single-use pairing, public-shell boundaries, manifest/service-worker assets,
+  request-id persistence, rate limiting, stale-FTS health failure, backup
+  dry-run and real snapshot/restore, FTS rebuild, and stale-only re-embedding.
+- Complete local suite: **258 passed**. `git diff --check`, Python compilation,
+  JavaScript syntax checks, manifest/YAML parsing, and environment-variable
+  inventory checks are part of the final validation pass.
+- The same **258 tests** pass from an isolated source copy with no `.git`,
+  `.env`, `data/`, or virtual environment, importing only that copied source.
+- At 390×844 browser emulation, the library and share page have no horizontal
+  overflow. A fresh browser origin followed a one-time QR URL, removed the
+  token query, loaded authenticated fragments without token entry, and a
+  second consume returned HTTP 410.
+- The Web Share Target contract and both URL/PDF ingest branches are exercised
+  automatically. A real Android/iOS share-sheet install, a live OpenRouter
+  ingest, and a clean-machine Docker production boot still require an HTTPS
+  host with Docker, credentials, and a supported browser; those facilities
+  were not available in the local verification environment.
+
+## 5. Known limitations
+
+- Browser support for Web Share Target is platform-dependent (best on
+  Chromium/Android); unsupported browsers still have the normal upload dialog.
+- Offline capture stages one most-recent share locally, but ingest itself is
+  deliberately online-only and must reach the API, Redis worker, models, and
+  source URL. There is no offline mutation queue.
+- Pairing grants the single shared API token. There is no device list or
+  per-device revocation; rotate `API_TOKEN` to revoke every paired browser.
+- In-memory ingest rate limits are per API process and reset on restart. The
+  supplied production topology intentionally runs one API replica.
+- Full health loads the embedding model and calls OpenRouter, so it can be
+  slower than the lightweight liveness endpoint. Container healthchecks use
+  the lightweight endpoint; administrators invoke the full check explicitly.
+- Local snapshots are not off-site backups until `scripts/backup.sh` uploads
+  them with restic or an operator copies completed directories with rsync.
+
+## 6. Ideas for later
+
+- Per-device credentials with a paired-device/revocation screen.
+- A durable multi-item offline capture queue with background-sync where the
+  browser supports it.
+- Backup encryption-key rotation checks and scheduled restore-drill reporting.
+- Optional Prometheus/OpenTelemetry export built from the existing JSON request
+  ids and cost summaries.
+- A mobile-native PDF reader that preserves `Mouseion.jumpToPdf` authenticated
+  blob and page-fragment semantics.

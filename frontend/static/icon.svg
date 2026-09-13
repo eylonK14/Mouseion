@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Mouseion">
+  <rect width="512" height="512" rx="108" fill="#0d0d0d"/>
+  <path d="M105 118h226c42 0 76 34 76 76v230H181c-42 0-76-34-76-76V118Z" fill="#171717" stroke="#38bdf8" stroke-width="24"/>
+  <path d="M181 118v306M225 190h116M225 250h116M225 310h82" fill="none" stroke="#ececec" stroke-width="22" stroke-linecap="round"/>
+  <circle cx="181" cy="118" r="25" fill="#38bdf8"/>
+</svg>

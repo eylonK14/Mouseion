@@ -1,0 +1,62 @@
+<div class="grid gap-4 lg:grid-cols-2">
+  <section class="panel p-4 lg:col-span-2">
+    <div class="mb-3 flex items-center justify-between gap-3">
+      <div><h2 class="font-semibold">System health</h2><p class="muted text-xs">Full dependency check · {{ health.status }}</p></div>
+      <button class="btn" type="button" data-admin-refresh>Run again</button>
+    </div>
+    <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+      {% for check in health.checks %}
+      <div class="rounded-lg border p-3 {% if check.status == 'ok' %}border-emerald-500/25{% elif check.status == 'warning' %}border-amber-500/30{% else %}border-red-500/35{% endif %}">
+        <div class="flex items-center justify-between"><strong class="text-sm">{{ check.name }}</strong><span class="faint text-[11px]">{{ check.latency_ms }} ms</span></div>
+        <p class="muted mt-1 text-xs break-words">{{ check.detail }}</p>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="panel p-4">
+    <h2 class="font-semibold">Pair a phone</h2>
+    <p class="muted mt-1 text-xs">Creates a single-use QR code that expires quickly. The API token is never printed.</p>
+    <button id="pairing-create" type="button" class="btn btn-primary mt-4">Create pairing QR</button>
+    <div id="pairing-result" class="mt-4 hidden text-center">
+      <img id="pairing-qr" class="mx-auto w-56 rounded-lg bg-white p-2" alt="One-time device pairing QR code" />
+      <a id="pairing-link" class="mt-3 block break-all text-xs text-sky-300 underline"></a>
+      <p id="pairing-expiry" class="faint mt-1 text-xs"></p>
+    </div>
+  </section>
+
+  <section class="panel p-4">
+    <h2 class="font-semibold">Queue</h2>
+    <div class="mt-3 flex flex-wrap gap-2">
+      {% for row in queue_counts %}<span class="chip">{{ row['state'] }} · {{ row['count'] }}</span>{% else %}<span class="muted text-sm">No jobs yet.</span>{% endfor %}
+    </div>
+    {% if failed_jobs %}
+    <h3 class="mt-5 text-sm font-medium text-red-200">Failed jobs</h3>
+    <div class="mt-2 space-y-2">
+      {% for job in failed_jobs %}
+      <div class="rounded-lg border border-red-500/25 p-3 text-xs">
+        <div class="flex items-center justify-between gap-2"><code>{{ job['id'][:10] }}</code><button class="btn" data-retry-job="{{ job['id'] }}">Retry</button></div>
+        <p class="mt-1 break-words text-red-200">{{ job['error'] }}</p>
+        {% if job['request_id'] %}<p class="faint mt-1">request {{ job['request_id'] }}</p>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </section>
+
+  <section class="panel overflow-hidden lg:col-span-2">
+    <div class="border-b border-neutral-800 p-4"><h2 class="font-semibold">Recent jobs</h2></div>
+    <div class="overflow-x-auto"><table class="w-full min-w-[680px] text-left text-xs">
+      <thead class="faint"><tr><th class="p-3">Updated</th><th class="p-3">Job</th><th class="p-3">Kind</th><th class="p-3">State</th><th class="p-3">Attempts</th><th class="p-3">Request</th></tr></thead>
+      <tbody>{% for job in recent_jobs %}<tr class="border-t border-neutral-800"><td class="p-3">{{ job['updated_at'][:19] }}</td><td class="p-3"><code>{{ job['id'][:10] }}</code></td><td class="p-3">{{ job['kind'] }}</td><td class="p-3">{{ job['state'] }}</td><td class="p-3">{{ job['attempts'] }}</td><td class="p-3"><code>{{ (job['request_id'] or '—')[:16] }}</code></td></tr>{% else %}<tr><td colspan="6" class="muted p-4">No jobs yet.</td></tr>{% endfor %}</tbody>
+    </table></div>
+  </section>
+
+  <section class="panel overflow-hidden lg:col-span-2">
+    <div class="border-b border-neutral-800 p-4"><h2 class="font-semibold">QA tokens by day and model</h2><p class="muted text-xs">Last 30 days; examiner outcomes live in test sessions and are not included.</p></div>
+    <div class="overflow-x-auto"><table class="w-full min-w-[640px] text-left text-xs">
+      <thead class="faint"><tr><th class="p-3">Day</th><th class="p-3">Model</th><th class="p-3">Requests</th><th class="p-3">Prompt</th><th class="p-3">Completion</th><th class="p-3">Total</th></tr></thead>
+      <tbody>{% for row in qa_costs %}<tr class="border-t border-neutral-800"><td class="p-3">{{ row['day'] }}</td><td class="p-3 break-all">{{ row['model'] }}</td><td class="p-3">{{ row['requests'] }}</td><td class="p-3">{{ row['prompt_tokens'] }}</td><td class="p-3">{{ row['completion_tokens'] }}</td><td class="p-3">{{ row['total_tokens'] }}</td></tr>{% else %}<tr><td colspan="6" class="muted p-4">No QA usage yet.</td></tr>{% endfor %}</tbody>
+    </table></div>
+  </section>
+</div>

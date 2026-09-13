@@ -224,6 +224,7 @@ __marimo__/
 # --- Mouseion ---------------------------------------------------------------
 # Content-addressed PDFs, PageIndex trees, and the SQLite DB. Never committed.
 /data/
+/backups/
 # Local sentence-transformers / HuggingFace cache when running outside docker.
 .hf-cache/
 # pytest/coverage

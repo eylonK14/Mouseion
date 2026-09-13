@@ -1,15 +1,15 @@
-/* Mouseion — Phase 2 UI.
+/* Mouseion application UI.
  *
- * Tailwind (Play CDN, loaded in base.html) does the layout and spacing. This
+ * The checked-in Tailwind build does the layout and spacing. This
  * file holds the three things it cannot:
  *
  *   1. The palette, as CSS variables, so the fallback below and the Tailwind
  *      classes agree on what "panel" means.
  *   2. Component classes used often enough that repeating twelve utilities
  *      would bury the markup (.chip, .btn, .panel, .field).
- *   3. A no-CDN fallback. The stack is self-hosted and reachable over
- *      Tailscale; if it is ever offline the library must still be legible, so
- *      the essentials are duplicated here in plain CSS rather than assumed.
+ *   3. A compact non-utility fallback. If the generated stylesheet is ever
+ *      unavailable the library remains legible, so essentials are duplicated
+ *      here in plain CSS rather than assumed.
  *
  * Palette is Open WebUI's default dark family — near-black canvas, one step up
  * for panels, sky/blue accent, rounded-lg everywhere.

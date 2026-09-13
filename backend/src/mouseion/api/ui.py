@@ -22,13 +22,14 @@ import sqlite3
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, status
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from mouseion.api.models import BlankableInt, BlankableStatus, PaperStatus
 from mouseion.api.search import build_query, to_hits
 from mouseion.config import Settings, get_settings
 from mouseion.db import get_db
+from mouseion.services import admin as admin_service
 from mouseion.services import notes as notes_repo
 from mouseion.services import papers as papers_repo
 from mouseion.services.examiner import (
@@ -37,6 +38,7 @@ from mouseion.services.examiner import (
     session_payload as test_session_payload,
 )
 from mouseion.services.search import SORT_KEYS, search_papers
+from mouseion.services.health import run_full_health
 from mouseion.services.taxonomy import (
     TopicError,
     TopicNotFoundError,
@@ -146,10 +148,75 @@ def taxonomy_shell(request: Request) -> HTMLResponse:
     return render(request, "taxonomy.html")
 
 
+@router.get("/admin", response_class=HTMLResponse, include_in_schema=False)
+def admin_shell(request: Request) -> HTMLResponse:
+    return render(request, "admin.html")
+
+
+@router.api_route(
+    "/share", methods=["GET", "POST"], response_class=HTMLResponse, include_in_schema=False
+)
+def share_shell(request: Request) -> HTMLResponse:
+    # Installed PWAs have their share POST intercepted and staged by sw.js.
+    # Keeping a public POST fallback gives a useful explanation when a browser
+    # invokes the target before the service worker has taken control.
+    return render(request, "share.html", {"worker_missed": request.method == "POST"})
+
+
+@router.get("/pair", response_class=HTMLResponse, include_in_schema=False)
+def pair_shell(request: Request) -> HTMLResponse:
+    # The opaque nonce stays in location.search and is consumed by pair.js; it
+    # is never interpolated into HTML or logged by application code.
+    return render(request, "pair.html")
+
+
+@router.get("/sw.js", include_in_schema=False)
+def service_worker(settings: Settings = Depends(get_settings)) -> FileResponse:
+    return FileResponse(
+        settings.static_dir / "sw.js",
+        media_type="application/javascript",
+        headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-cache"},
+    )
+
+
+@router.get("/manifest.webmanifest", include_in_schema=False)
+def web_manifest(settings: Settings = Depends(get_settings)) -> FileResponse:
+    return FileResponse(
+        settings.static_dir / "manifest.webmanifest",
+        media_type="application/manifest+json",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@router.get("/offline", include_in_schema=False)
+def offline_page(settings: Settings = Depends(get_settings)) -> FileResponse:
+    return FileResponse(settings.static_dir / "offline.html", media_type="text/html")
+
+
 # ---------------------------------------------------------------------------
 # fragments — authenticated
 # ---------------------------------------------------------------------------
 ui = APIRouter(prefix="/ui", tags=["ui"], include_in_schema=False)
+
+
+@ui.get("/admin", response_class=HTMLResponse)
+async def admin_fragment(
+    request: Request,
+    conn: sqlite3.Connection = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> HTMLResponse:
+    health = await run_full_health(conn=conn, settings=settings)
+    return render(
+        request,
+        "partials/admin.html",
+        {
+            "health": health,
+            "queue_counts": admin_service.queue_counts(conn),
+            "failed_jobs": admin_service.failed_jobs(conn),
+            "recent_jobs": admin_service.recent_jobs(conn),
+            "qa_costs": admin_service.qa_costs(conn),
+        },
+    )
 
 
 @ui.get("/results", response_class=HTMLResponse)

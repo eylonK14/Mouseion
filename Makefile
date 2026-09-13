@@ -1,4 +1,4 @@
-# Mouseion — Phases 1-4
+# Mouseion — complete system
 #
 # Recipes use a leading TAB (GNU make). If you are on Windows without make,
 # every target's body is a plain docker compose / pytest command you can paste;
@@ -8,7 +8,7 @@ SHELL := /bin/sh
 COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
-.PHONY: help up webui down build logs ps migrate revision test test-local shell clean env
+.PHONY: help up webui down build logs ps migrate revision test test-local shell clean env first-paper backup backup-dry-run restore-drill reembed reindex-fts health-full
 
 help: ## Show available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -26,6 +26,9 @@ up: env ## Build if needed, run migrations, start the stack
 webui: env ## Start the optional Open WebUI QA and test-mode chat surface
 	$(COMPOSE) --profile webui up -d open-webui
 	@echo "open webui: http://localhost:$${WEBUI_PORT:-3000}"
+
+first-paper: ## Ingest the Attention Is All You Need arXiv paper and wait for completion
+	$(COMPOSE) exec -T api python -m mouseion.smoke_ingest
 
 down: ## Stop the stack (keeps ./data and volumes)
 	$(COMPOSE) down
@@ -53,6 +56,24 @@ test-local: ## Run the test suite against a local virtualenv (no docker)
 
 shell: ## Open a shell in the api image
 	$(COMPOSE) run --rm --no-deps --entrypoint sh api
+
+backup: ## Create a consistent dated SQLite/PDF/tree snapshot
+	$(COMPOSE) run --rm --no-deps api python -m mouseion.maintenance backup
+
+backup-dry-run: ## Show what a backup would capture and prune
+	$(COMPOSE) run --rm --no-deps api python -m mouseion.maintenance backup --dry-run
+
+restore-drill: backup ## Restore the latest snapshot into scratch and verify it
+	$(COMPOSE) run --rm --no-deps api python -m mouseion.maintenance restore-drill
+
+reembed: ## Re-embed papers missing the configured model marker or carrying an old one
+	$(COMPOSE) run --rm --no-deps api python -m mouseion.maintenance reembed
+
+reindex-fts: ## Rebuild the FTS index from source tables
+	$(COMPOSE) run --rm --no-deps api python -m mouseion.maintenance reindex-fts
+
+health-full: ## Run full startup diagnostics from the API image
+	$(COMPOSE) run --rm --no-deps api python -m mouseion.maintenance health-check
 
 clean: ## Stop the stack and delete volumes (NOT ./data)
 	$(COMPOSE) down -v

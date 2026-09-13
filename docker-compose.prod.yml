@@ -1,0 +1,142 @@
+name: mouseion-prod
+
+x-backend: &backend
+  build:
+    context: ./backend
+    dockerfile: Dockerfile
+  env_file: [.env]
+  environment:
+    DATA_DIR: /app/data
+    DB_PATH: /app/data/library.db
+    BACKUP_DIR: /app/backups
+    FRONTEND_DIR: /app/frontend
+    REDIS_URL: redis://redis:6379/0
+    HF_HOME: /app/.hf-cache
+  volumes:
+    - mouseion-data:/app/data
+    - ${BACKUP_HOST_DIR:-./backups}:/app/backups
+    - ./frontend:/app/frontend:ro
+    - ./pipes:/app/pipes:ro
+    - hf-cache:/app/.hf-cache
+  security_opt:
+    - no-new-privileges:true
+  init: true
+
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: {cpus: "0.50", memory: 256M}
+        reservations: {memory: 32M}
+
+  migrate:
+    <<: *backend
+    command: ["alembic", "upgrade", "head"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "from pathlib import Path; import os; assert Path(os.environ['DATA_DIR']).is_dir()"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: "no"
+    deploy:
+      resources:
+        limits: {cpus: "1.00", memory: 512M}
+
+  api:
+    <<: *backend
+    command: ["uvicorn", "mouseion.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+    depends_on:
+      redis: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; assert urllib.request.urlopen('http://localhost:8000/health', timeout=5).status == 200"]
+      interval: 15s
+      timeout: 6s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: {cpus: "2.00", memory: 2G}
+        reservations: {memory: 256M}
+
+  worker:
+    <<: *backend
+    command: ["arq", "mouseion.worker.WorkerSettings"]
+    depends_on:
+      redis: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; from redis import Redis; assert Redis.from_url(os.environ['REDIS_URL']).ping(); assert b'arq' in open('/proc/1/cmdline','rb').read()"]
+      interval: 20s
+      timeout: 6s
+      retries: 6
+      start_period: 30s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: {cpus: "4.00", memory: 6G}
+        reservations: {memory: 1G}
+
+  backup:
+    <<: *backend
+    profiles: ["maintenance"]
+    command: ["python", "-m", "mouseion.maintenance", "backup"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD", "python", "-c", "from pathlib import Path; import os; assert Path(os.environ['DATA_DIR']).is_dir(); assert Path(os.environ['BACKUP_DIR']).is_dir()"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: "no"
+    deploy:
+      resources:
+        limits: {cpus: "1.00", memory: 1G}
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    profiles: ["webui"]
+    ports:
+      - "127.0.0.1:${WEBUI_PORT:-3000}:8080"
+    volumes:
+      - open-webui-state:/app/backend/data
+      - ./pipes:/app/backend/data/mouseion-pipes:ro
+    environment:
+      WEBUI_AUTH: "true"
+      RAG_EMBEDDING_ENGINE: "openai"
+      RAG_EMBEDDING_MODEL_AUTO_UPDATE: "false"
+      RAG_RERANKING_MODEL_AUTO_UPDATE: "false"
+      WHISPER_MODEL_AUTO_UPDATE: "false"
+      ENABLE_VERSION_UPDATE_CHECK: "false"
+    depends_on:
+      api: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; assert urllib.request.urlopen('http://localhost:8080/health', timeout=5).status == 200"]
+      interval: 20s
+      timeout: 6s
+      retries: 20
+      start_period: 60s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: {cpus: "2.00", memory: 2G}
+        reservations: {memory: 256M}
+
+volumes:
+  mouseion-data:
+  redis-data:
+  hf-cache:
+  open-webui-state:

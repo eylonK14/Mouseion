@@ -19,6 +19,10 @@ x-backend: &backend
     context: ./backend
     dockerfile: Dockerfile
   env_file: [.env]
+  # Development keeps the historical ./data bind mount. Root is limited to
+  # these local backend containers so a fresh Linux clone can write that host
+  # directory; docker-compose.prod.yml explicitly runs UID/GID 10001 instead.
+  user: "0:0"
   environment:
     DATA_DIR: /app/data
     DB_PATH: /app/data/library.db
@@ -29,6 +33,7 @@ x-backend: &backend
     HF_HOME: /app/.hf-cache
   volumes:
     - ./data:/app/data
+    - ${BACKUP_HOST_DIR:-./backups}:/app/backups
     - ./frontend:/app/frontend:ro
     # The API does not execute pipe code, but its test suite verifies the
     # shared Open WebUI transport helpers against the checked-out source.
@@ -54,7 +59,7 @@ services:
   api:
     <<: *backend
     command:
-      ["uvicorn", "mouseion.main:app", "--host", "0.0.0.0", "--port", "8000"]
+      ["uvicorn", "mouseion.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
     ports:
       - "${API_PORT:-8000}:8000"
     depends_on:

@@ -10,9 +10,10 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from mouseion import __version__
-from mouseion.api import health, jobs, notes, papers, qa, search, test_mode, topics, ui
+from mouseion.api import capture, health, jobs, notes, papers, qa, search, test_mode, topics, ui
 from mouseion.auth import BearerAuthMiddleware
 from mouseion.config import get_settings
+from mouseion.observability import RequestIdMiddleware, configure_logging
 from mouseion.services import queue
 from mouseion.services.llm import get_llm_client
 
@@ -22,7 +23,7 @@ log = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
-    logging.basicConfig(level=settings.log_level)
+    configure_logging(settings.log_level)
     settings.ensure_dirs()
     if not settings.api_token:
         log.warning("API_TOKEN is not set — every /api route will return 503")
@@ -33,6 +34,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    configure_logging(settings.log_level)
     app = FastAPI(
         title="Mouseion",
         version=__version__,
@@ -41,8 +43,12 @@ def create_app() -> FastAPI:
     )
 
     app.add_middleware(BearerAuthMiddleware)
+    # Added last so it wraps auth failures too and every HTTP response carries
+    # a correlation id.
+    app.add_middleware(RequestIdMiddleware)
 
     app.include_router(health.router)
+    app.include_router(capture.router)
     app.include_router(papers.router)
     app.include_router(notes.router)
     app.include_router(search.router)

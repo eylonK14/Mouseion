@@ -36,6 +36,7 @@ class Settings(BaseModel):
 
     # --- auth ---
     api_token: str = ""
+    pairing_token_ttl_minutes: int = Field(default=10, ge=1, le=60)
 
     # --- LLM routing (OpenRouter) ---
     openrouter_api_key: str = ""
@@ -73,12 +74,16 @@ class Settings(BaseModel):
     # --- storage ---
     data_dir: Path = Field(default=Path("./data"))
     db_path: Path = Field(default=Path("./data/library.db"))
+    backup_dir: Path = Field(default=Path("./backups"))
+    backup_retention_days: int = Field(default=30, ge=1, le=3650)
 
     # --- queue ---
     redis_url: str = "redis://localhost:6379/0"
 
     # --- ingest limits ---
     max_upload_mb: int = 64
+    ingest_rate_limit_count: int = Field(default=20, ge=1, le=10_000)
+    ingest_rate_limit_window_seconds: int = Field(default=60, ge=1, le=86_400)
     http_timeout_seconds: int = 60
     arxiv_api_base: str = "http://export.arxiv.org/api/query"
     ingest_text_budget_chars: int = 24_000
@@ -86,10 +91,12 @@ class Settings(BaseModel):
     # --- app ---
     log_level: str = "INFO"
     frontend_dir: Path = Field(default=Path("./frontend"))
+    public_base_url: str = ""
+    health_openrouter_timeout_seconds: int = Field(default=5, ge=1, le=60)
+    health_min_free_disk_mb: int = Field(default=1024, ge=0)
 
     # Where Open WebUI is reachable *from the browser*, not from inside the
-    # compose network. Phase 3 uses it for the enabled paper-QA deep link;
-    # Phase 4 will use the same seam for the still-disabled examiner button.
+    # compose network. Paper QA and examiner deep links use this browser URL.
     openwebui_base_url: str = "http://localhost:3000"
 
     @property
@@ -126,6 +133,7 @@ def get_settings() -> Settings:
     data_dir = Path(_env("DATA_DIR", "./data"))
     return Settings(
         api_token=_env("API_TOKEN"),
+        pairing_token_ttl_minutes=_env_int("PAIRING_TOKEN_TTL_MINUTES", 10),
         openrouter_api_key=_env("OPENROUTER_API_KEY"),
         openrouter_base_url=_env("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
         model_ingest=_env("MODEL_INGEST", "anthropic/claude-haiku-4.5"),
@@ -151,12 +159,19 @@ def get_settings() -> Settings:
         pageindex_mode=_env("PAGEINDEX_MODE", "flash"),
         data_dir=data_dir,
         db_path=Path(_env("DB_PATH", str(data_dir / "library.db"))),
+        backup_dir=Path(_env("BACKUP_DIR", "./backups")),
+        backup_retention_days=_env_int("BACKUP_RETENTION_DAYS", 30),
         redis_url=_env("REDIS_URL", "redis://localhost:6379/0"),
         max_upload_mb=_env_int("MAX_UPLOAD_MB", 64),
+        ingest_rate_limit_count=_env_int("INGEST_RATE_LIMIT_COUNT", 20),
+        ingest_rate_limit_window_seconds=_env_int("INGEST_RATE_LIMIT_WINDOW_SECONDS", 60),
         http_timeout_seconds=_env_int("HTTP_TIMEOUT_SECONDS", 60),
         arxiv_api_base=_env("ARXIV_API_BASE", "http://export.arxiv.org/api/query"),
         ingest_text_budget_chars=_env_int("INGEST_TEXT_BUDGET_CHARS", 24_000),
         log_level=_env("LOG_LEVEL", "INFO"),
         frontend_dir=Path(_env("FRONTEND_DIR", "./frontend")),
+        public_base_url=_env("PUBLIC_BASE_URL").rstrip("/"),
+        health_openrouter_timeout_seconds=_env_int("HEALTH_OPENROUTER_TIMEOUT_SECONDS", 5),
+        health_min_free_disk_mb=_env_int("HEALTH_MIN_FREE_DISK_MB", 1024),
         openwebui_base_url=_env("OPENWEBUI_BASE_URL", "http://localhost:3000").rstrip("/"),
     )

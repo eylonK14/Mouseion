@@ -250,6 +250,7 @@ class JobOut(BaseModel):
     duplicate: bool = False
     attempts: int = 0
     completed_steps: list[str] = Field(default_factory=list)
+    request_id: str | None = None
     created_at: str
     updated_at: str
 
@@ -265,6 +266,7 @@ class JobOut(BaseModel):
             duplicate=bool(row["duplicate"]),
             attempts=row["attempts"],
             completed_steps=list((progress or {}).get("steps", [])),
+            request_id=row["request_id"] if "request_id" in row.keys() else None,
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )

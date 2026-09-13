@@ -6,13 +6,15 @@ reachable from a phone over Tailscale.
 Exemptions, and why they are the only ones:
 
 * `/health` — required by the compose healthcheck, exposes nothing.
-* The UI shells (`/`, `/papers/{id}`, `/taxonomy`, `/static/*`) — a browser
+* The UI/PWA shells (`/`, `/papers/{id}`, `/taxonomy`, `/admin`, `/share`,
+  `/pair`, `/offline`, `/manifest.webmanifest`, `/sw.js`, `/static/*`) — a browser
   cannot attach an `Authorization` header to a top-level navigation, so a
   protected shell would be unreachable by design. A shell is markup containing
   no library data; it prompts for the token and sends it on every `/api/*` and
   `/ui/*` request, all of which are protected. In particular `/papers/{id}`
   renders without looking the paper up, so being public does not even leak
-  which ids exist. `/docs` and `/openapi.json` are NOT exempt.
+  which ids exist. The pairing-consume endpoint is gated by its opaque,
+  expiring, single-use nonce. `/docs` and `/openapi.json` are NOT exempt.
 
 Fails closed: with no API_TOKEN configured, every protected route returns 503
 rather than silently accepting anonymous traffic.
@@ -29,7 +31,24 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from mouseion.config import get_settings
 
-PUBLIC_PATHS = frozenset({"/health", "/", "/index.html", "/favicon.ico", "/taxonomy"})
+PUBLIC_PATHS = frozenset(
+    {
+        "/health",
+        "/",
+        "/index.html",
+        "/favicon.ico",
+        "/taxonomy",
+        "/admin",
+        "/share",
+        "/pair",
+        "/offline",
+        "/sw.js",
+        "/manifest.webmanifest",
+        # The opaque, expiring, single-use pairing token is the credential for
+        # this one endpoint. Every other /api route still needs the bearer.
+        "/api/pairing/consume",
+    }
+)
 PUBLIC_PREFIXES = ("/static/",)
 # Only the shell. `/papers/12/anything` is not a route, and matching loosely
 # here would expose whatever a later phase mounts underneath it.

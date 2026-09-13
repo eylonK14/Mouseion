@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}Add shared paper · Mouseion{% endblock %}
+
+{% block head %}<script src="/static/share.js"></script>{% endblock %}
+
+{% block body %}
+<main class="mx-auto flex min-h-[calc(100vh-57px)] max-w-xl items-center px-4 py-8">
+  <section class="panel w-full space-y-5 p-5 sm:p-7" aria-labelledby="share-title">
+    <div>
+      <p class="mb-1 text-xs font-medium uppercase tracking-widest text-sky-400">Phone capture</p>
+      <h1 id="share-title" class="text-xl font-semibold">Add this to Mouseion</h1>
+      <p class="muted mt-2 text-sm">Check what your share sheet sent, then add it with one tap.</p>
+    </div>
+
+    {% if worker_missed %}
+      <p class="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">
+        The share was not captured because the app had not finished installing. Open Mouseion once,
+        then share the paper again.
+      </p>
+    {% endif %}
+
+    <div id="share-empty" class="muted text-sm">Reading the shared item…</div>
+    <dl id="share-preview" class="hidden space-y-3 text-sm">
+      <div id="share-file-row" class="hidden">
+        <dt class="faint text-xs uppercase tracking-wide">PDF</dt>
+        <dd id="share-file" class="mt-1 break-words"></dd>
+      </div>
+      <div id="share-url-row" class="hidden">
+        <dt class="faint text-xs uppercase tracking-wide">Link or text</dt>
+        <dd id="share-url" class="mt-1 max-h-40 overflow-y-auto break-words whitespace-pre-wrap"></dd>
+      </div>
+    </dl>
+
+    <div id="share-progress" class="hidden" aria-live="polite">
+      <div class="mb-2 flex items-center justify-between text-xs">
+        <span id="share-progress-label">Queued…</span>
+        <span id="share-progress-state" class="faint"></span>
+      </div>
+      <div class="h-1.5 overflow-hidden rounded-full bg-neutral-800">
+        <div id="share-progress-bar" class="h-full w-[8%] rounded-full bg-sky-400 transition-all"></div>
+      </div>
+    </div>
+
+    <p id="share-error" class="hidden text-sm text-red-300" role="alert"></p>
+    <div class="flex gap-2">
+      <a href="/" class="btn flex-1 justify-center">Cancel</a>
+      <button id="share-add" class="btn btn-primary flex-1 justify-center" type="button" disabled>
+        Add to library
+      </button>
+    </div>
+  </section>
+</main>
+{% endblock %}
