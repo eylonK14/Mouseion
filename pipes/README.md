@@ -2,7 +2,8 @@
 
 These are Open WebUI **Pipe Functions**. They are deliberately thin: tag and
 conversation-scope handling happens here, while retrieval, prompts, OpenRouter
-calls, grounding checks, and cost logging stay in the Mouseion backend.
+calls, grounding checks, examiner state, grading, and cost logging stay in the
+Mouseion backend.
 
 ## Install into the compose Open WebUI container
 
@@ -25,16 +26,17 @@ calls, grounding checks, and cost logging stay in the Mouseion backend.
    at `/app/backend/data/mouseion-pipes`.
 
 3. Open `http://localhost:${WEBUI_PORT:-3000}`. Go to **Admin Panel →
-   Functions → + Create Function**. Create and enable these two functions:
+   Functions → + Create Function**. Create and enable these three functions:
 
    | Function id | Source file | Model shown in the picker |
    | --- | --- | --- |
    | `paper_library` | `pipes/library_qa.py` | 📚 Paper Library |
    | `single_paper` | `pipes/single_paper.py` | 📄 Single Paper |
+   | `test_me` | `pipes/test_me.py` | 🎓 Test me |
 
    Paste each file's complete source into the editor. The ids above are
-   important: the Mouseion detail-page deep link selects `single_paper` via
-   Open WebUI's `?model=single_paper&q=...` URL parameters.
+   important: Mouseion's detail-page deep links select `single_paper` or
+   `test_me` through Open WebUI's `model` and `q` URL parameters.
 
 4. Open the gear icon for each Function and set its Valves:
 
@@ -49,6 +51,21 @@ calls, grounding checks, and cost logging stay in the Mouseion backend.
    with `[paper:12] Your question`; without a tag, the first message is matched
    against paper titles and the pipe either locks one clear match or asks you
    to choose from the best candidates.
+
+6. Select **🎓 Test me** and start with `[test:12]` or `[paper:12]`; without a
+   tag, mention the paper title and the same backend-owned fuzzy resolver is
+   used. The pipe starts a persisted session, relays the opening explanation
+   prompt and grounded probes, and renders the final rubric, misconceptions,
+   and reread list as Markdown. Its hidden session marker lets Open WebUI's
+   retained conversation resume the same backend session after a reconnect.
+
+## Voice mode
+
+Open WebUI's built-in voice/call mode works with **🎓 Test me** as-is. Start a
+call while that model is selected and speak each explanation or probe response;
+the pipe needs no audio or speech integration. If you want ElevenLabs text to
+speech, configure it in Open WebUI's audio settings. Mouseion does not call or
+embed ElevenLabs directly.
 
 ## Development / hot reload
 
@@ -72,6 +89,12 @@ docker compose logs -f api open-webui
 - Collection: `POST http://api:8000/api/qa/collection`
 - Paper: `POST http://api:8000/api/qa/paper/{id}`
 - Title resolution: `POST http://api:8000/api/qa/paper/resolve`
+- Start exam: `POST http://api:8000/api/test/{paper_id}/start`
+- Advance exam: `POST http://api:8000/api/test/{session_id}/turn`
+- Reload exam: `GET http://api:8000/api/test/{session_id}`
 - The backend emits named SSE events: `metadata`, `token`, `done`, and `error`.
   Pipes yield only token/error text to Open WebUI; metadata remains available
   to direct clients such as Mouseion's inline quick-question box.
+- Examiner turns additionally emit a structured `verdict` event. The Test-me
+  pipe formats it; prompts, state transitions, section validation, and grading
+  remain in the backend.

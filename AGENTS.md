@@ -18,7 +18,7 @@ accurate when a change makes them stale.
 
 ## Current state and roadmap
 
-Phases 1 through 3 are implemented:
+Phases 1 through 4 are implemented:
 
 - Foundation: SQLite schema, PDF/arXiv ingestion, resumable arq jobs, taxonomy,
   summaries, PageIndex-compatible trees, paper embeddings, and a basic API.
@@ -27,15 +27,16 @@ Phases 1 through 3 are implemented:
 - Grounded QA: hybrid paper retrieval, bounded tree navigation, collection and
   single-paper SSE, Open WebUI Pipe Functions, inline paper QA, and `qa_log`
   model/token/latency visibility.
+- Test mode: persisted EXPLAIN → PROBE → VERDICT sessions, grounded probes,
+  validated rubric grading, Open WebUI voice-ready examiner transport,
+  understanding history, and opt-in `understood` status offers.
 
 The next planned work is:
 
-1. Phase 4: explain-it-back examiner conversations, rubric grading, gap
-   reporting, and test history.
-2. Phase 5: phone/PWA capture, deployment hardening, vendored frontend assets,
+1. Phase 5: phone/PWA capture, deployment hardening, vendored frontend assets,
    non-root services, and backups.
 
-Do not describe planned Phase 4-5 behavior as already implemented.
+Do not describe planned Phase 5 behavior as already implemented.
 
 ## Repository map
 
@@ -62,11 +63,15 @@ Do not describe planned Phase 4-5 behavior as already implemented.
 - `backend/src/mouseion/services/qa.py`: hybrid shortlist, tree-grounding,
   context budgets, citation checks, title resolution, and the Phase 4 paper
   grounding seam.
+- `backend/src/mouseion/services/examiner.py`: explicit examiner state machine,
+  grounded probe/verdict orchestration, session persistence, expiry, history,
+  and reread page targets.
 - `backend/src/mouseion/services/taxonomy.py`: controlled hierarchical topics,
   cycle-safe traversal/editing, split/merge/delete behavior, and paper-topic
   links.
 - `backend/migrations/`: Alembic schema. Migration `0001` includes tables and
-  virtual tables anticipated through test mode; `0002` adds QA cost logging.
+  virtual tables anticipated through test mode; `0002` adds QA cost logging;
+  `0003` adds resumable examiner state to `test_sessions`.
 - `backend/tests/`: pytest suite; LLMs and embeddings are mocked where needed.
 - `frontend/templates/`: public data-free page shells and authenticated HTMX
   fragments, rendered by the backend.
@@ -74,8 +79,9 @@ Do not describe planned Phase 4-5 behavior as already implemented.
   hooks, job polling, PDF loading, toasts, taxonomy interactions, and the small
   escape-first Markdown renderer.
 - `frontend/static/app.css`: application styling and minimal offline fallback.
-- `pipes/`: thin Open WebUI Pipe Functions for collection and single-paper QA.
-  Prompts and LLM calls remain in the backend.
+- `pipes/`: thin Open WebUI Pipe Functions for collection QA, single-paper QA,
+  and test mode. Prompts, state transitions, grading, and LLM calls remain in
+  the backend.
 - `data/`: runtime SQLite database, content-addressed PDFs, and tree JSON. Treat
   it as user data, not source code; never delete or rewrite it casually.
 - `docker-compose.yml`: Redis, one-shot migrations, API, worker, and optional
@@ -141,17 +147,19 @@ Do not describe planned Phase 4-5 behavior as already implemented.
 - Reuse `Mouseion.renderMarkdown`; it is an intentionally small escape-first
   subset and avoids another CDN/parser dependency.
 
-## Phase 4 extension seams
+## Phase 5 extension seams
 
-- Reuse `services/qa.py::gather_grounding_material_for_paper` for stored
-  summaries and question-relevant tree sections; do not fork paper grounding.
+- Phone clients can start, advance, and reload examiner sessions through the
+  short authenticated `/api/test/*` contracts. Reloading by session id replays
+  persisted state; do not move active state into a browser, pipe, or worker.
+- The share target should enqueue through the existing ingest API and hand
+  progress to `Mouseion.watchJob`; ingestion remains resumable and async.
+- Preserve test-session and reread page links when making the PDF reader more
+  phone-native. `Mouseion.jumpToPdf` owns authenticated blob loading plus page
+  fragments.
 - Open WebUI pipes remain thin authenticated transport shims to
-  `http://api:8000`. They must not contain prompts, retrieval logic, grading
-  logic, or LLM calls.
-- The disabled paper-detail examiner button still exposes
-  `data-chat-prefix="[test:{id}]"` with the configured Open WebUI URL.
-- The `test_sessions` table already holds transcript, rubric, score, and gaps
-  for Phase 4.
+  `http://api:8000`. Voice/TTS is Open WebUI configuration, not backend or pipe
+  code.
 
 ## Testing and verification
 

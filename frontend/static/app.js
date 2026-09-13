@@ -178,6 +178,17 @@
     }
   };
 
+  M.openTestChat = function (button) {
+    try {
+      var url = new URL(button.dataset.openwebuiUrl, window.location.href);
+      url.searchParams.set("model", "test_me");
+      url.searchParams.set("q", button.dataset.chatPrefix);
+      window.open(url.toString(), "_blank", "noopener,noreferrer");
+    } catch (err) {
+      M.toast("Open WebUI URL is invalid: " + err.message, "error");
+    }
+  };
+
   function parseSseBlock(block) {
     var event = "message";
     var data = "";
@@ -256,6 +267,10 @@
   document.addEventListener("click", function (evt) {
     var button = evt.target.closest("[data-open-paper-chat]");
     if (button) M.openPaperChat(button);
+    var testButton = evt.target.closest("[data-open-test-chat]");
+    if (testButton) M.openTestChat(testButton);
+    var pageLink = evt.target.closest("[data-pdf-page]");
+    if (pageLink) M.jumpToPdf(pageLink.dataset.paperId, pageLink.dataset.pdfPage);
   });
 
   document.addEventListener("submit", function (evt) {
@@ -594,15 +609,21 @@
   // ------------------------------------------------------------ pdf viewer
   // The PDF route is behind the bearer token, and an <iframe> cannot send a
   // header — so fetch it here and hand the iframe a blob URL instead.
-  M.loadPdf = function (paperId) {
+  M.loadPdf = function (paperId, page) {
     var frame = $("pdf-frame");
     var statusEl = $("pdf-status");
     var button = $("pdf-load");
-    if (!frame) return;
+    if (!frame) return Promise.resolve();
+    if (frame.dataset.blobUrl) {
+      frame.src = frame.dataset.blobUrl + (page ? "#page=" + page : "");
+      frame.classList.remove("hidden");
+      frame.scrollIntoView({ behavior: "smooth", block: "start" });
+      return Promise.resolve();
+    }
     if (button) button.disabled = true;
     if (statusEl) statusEl.textContent = "Loading…";
 
-    fetch("/api/papers/" + paperId + "/pdf", {
+    return fetch("/api/papers/" + paperId + "/pdf", {
       headers: { Authorization: "Bearer " + M.token() },
     })
       .then(function (res) {
@@ -611,8 +632,10 @@
       })
       .then(function (blob) {
         var url = URL.createObjectURL(blob);
-        frame.src = url;
+        frame.dataset.blobUrl = url;
+        frame.src = url + (page ? "#page=" + page : "");
         frame.classList.remove("hidden");
+        if (page) frame.scrollIntoView({ behavior: "smooth", block: "start" });
         if (statusEl) statusEl.textContent = "";
         if (button) button.classList.add("hidden");
         // The blob outlives the iframe otherwise; a 64MB paper is worth freeing.
@@ -624,6 +647,10 @@
         if (statusEl) statusEl.textContent = err.message;
         if (button) button.disabled = false;
       });
+  };
+
+  M.jumpToPdf = function (paperId, page) {
+    M.loadPdf(paperId, page);
   };
 
   // ----------------------------------------------------- drag-to-merge

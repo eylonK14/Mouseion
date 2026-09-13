@@ -57,6 +57,11 @@ class Settings(BaseModel):
     qa_history_messages: int = 12
     qa_history_budget_chars: int = 12_000
 
+    # --- examiner mode ---
+    test_max_turns: int = Field(default=8, ge=1, le=50)
+    test_session_ttl_hours: int = Field(default=72, ge=1, le=8_760)
+    test_understood_threshold: int = Field(default=4, ge=1, le=5)
+
     # --- embeddings (local) ---
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     embedding_dim: int = 384
@@ -137,6 +142,9 @@ def get_settings() -> Settings:
         qa_tree_budget_chars=_env_int("QA_TREE_BUDGET_CHARS", 16_000),
         qa_history_messages=_env_int("QA_HISTORY_MESSAGES", 12),
         qa_history_budget_chars=_env_int("QA_HISTORY_BUDGET_CHARS", 12_000),
+        test_max_turns=_env_int("TEST_MAX_TURNS", 8),
+        test_session_ttl_hours=_env_int("TEST_SESSION_TTL_HOURS", 72),
+        test_understood_threshold=_env_int("TEST_UNDERSTOOD_THRESHOLD", 4),
         embedding_model=_env("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2"),
         embedding_dim=_env_int("EMBEDDING_DIM", 384),
         tree_indexer=_env("TREE_INDEXER", "auto"),  # type: ignore[arg-type]

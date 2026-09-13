@@ -28,7 +28,8 @@ explains a paper back to an LLM examiner and gets graded.
   - `paper_topics(paper_id, topic_id)` — many-to-many
   - `notes(id, paper_id, content, created_at, updated_at)`
   - `test_sessions(id, paper_id, transcript_json, rubric_json, score,
-     gaps_json, created_at)`
+     gaps_json, phase, turn_count, state_json, created_at, updated_at,
+     expires_at, completed_at)`
   - `ingest_jobs(id, kind, payload_json, state, error, created_at, ...)`
   - FTS5 virtual table over title/abstract/authors/summaries/full text
   - sqlite-vec virtual table: ONE embedding per paper (not per chunk),

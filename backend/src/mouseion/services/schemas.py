@@ -8,8 +8,9 @@ client retries exactly once with the validation error fed back (CLAUDE.md).
 from __future__ import annotations
 
 import re
+from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
 MAX_TOPIC_NAME_LEN = 60
 MAX_TOPICS_PER_PAPER = 6
@@ -141,3 +142,116 @@ class IngestExtraction(BaseModel):
         if len(value) > MAX_TOPICS_PER_PAPER:
             raise ValueError(f"at most {MAX_TOPICS_PER_PAPER} topics, got {len(value)}")
         return value
+
+
+# ---------------------------------------------------------------- examiner
+class ExaminerOutput(BaseModel):
+    """Strict base for Phase 4 structured examiner calls."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ExamProbe(ExaminerOutput):
+    question: str = Field(min_length=1, max_length=1_000)
+    section: str = Field(min_length=1, max_length=300)
+    focus: Literal["methodology", "results", "limitations", "results_and_limitations"]
+    targets_gap: bool
+    gap: str = Field(min_length=1, max_length=1_000)
+
+    @field_validator("question", "section", "gap")
+    @classmethod
+    def _tidy_probe_text(cls, value: str) -> str:
+        return re.sub(r"\s+", " ", value).strip()
+
+
+class ExamProbePlan(ExaminerOutput):
+    probes: list[ExamProbe] = Field(min_length=2, max_length=3)
+
+    @model_validator(mode="after")
+    def _grounded_and_gap_targeted(self, info: ValidationInfo) -> ExamProbePlan:
+        allowed = set((info.context or {}).get("allowed_sections") or [])
+        if allowed:
+            invented = [probe.section for probe in self.probes if probe.section not in allowed]
+            if invented:
+                raise ValueError(
+                    "probe section references must exactly match supplied tree sections; "
+                    f"invalid: {invented}"
+                )
+        if not any(probe.targets_gap for probe in self.probes):
+            raise ValueError("at least one probe must target a skipped or incorrect point")
+        focuses = {probe.focus for probe in self.probes}
+        if "methodology" not in focuses:
+            raise ValueError("probe plan must cover methodology")
+        if not focuses & {"results", "results_and_limitations"}:
+            raise ValueError("probe plan must cover results")
+        if not focuses & {"limitations", "results_and_limitations"}:
+            raise ValueError("probe plan must cover limitations")
+        return self
+
+
+class RubricDimension(ExaminerOutput):
+    score: int = Field(ge=1, le=5)
+    justification: str = Field(min_length=1, max_length=2_000)
+
+    @field_validator("justification")
+    @classmethod
+    def _tidy_justification(cls, value: str) -> str:
+        return re.sub(r"\s+", " ", value).strip()
+
+
+class ExamRubric(ExaminerOutput):
+    problem_understanding: RubricDimension
+    method_understanding: RubricDimension
+    results_and_limitations: RubricDimension
+
+
+class ExamMisconception(ExaminerOutput):
+    what_user_said: str = Field(min_length=1, max_length=2_000)
+    what_paper_says: str = Field(min_length=1, max_length=2_000)
+    section: str = Field(min_length=1, max_length=300)
+
+    @field_validator("what_user_said", "what_paper_says", "section")
+    @classmethod
+    def _tidy_misconception(cls, value: str) -> str:
+        return re.sub(r"\s+", " ", value).strip()
+
+
+class ExamOverall(ExaminerOutput):
+    score: int = Field(ge=1, le=5)
+    summary: str = Field(min_length=1, max_length=500)
+
+    @field_validator("summary")
+    @classmethod
+    def _one_line(cls, value: str) -> str:
+        return re.sub(r"\s+", " ", value).strip()
+
+
+class ExamVerdict(ExaminerOutput):
+    rubric: ExamRubric
+    misconceptions: list[ExamMisconception] = Field(default_factory=list, max_length=50)
+    reread: list[str] = Field(default_factory=list, max_length=20)
+    overall: ExamOverall
+
+    @field_validator("reread")
+    @classmethod
+    def _tidy_reread(cls, value: list[str]) -> list[str]:
+        result: list[str] = []
+        for raw in value:
+            section = re.sub(r"\s+", " ", raw).strip()
+            if section and section not in result:
+                result.append(section)
+        return result
+
+    @model_validator(mode="after")
+    def _references_real_sections(self, info: ValidationInfo) -> ExamVerdict:
+        allowed = set((info.context or {}).get("allowed_sections") or [])
+        if not allowed:
+            return self
+        references = [item.section for item in self.misconceptions] + self.reread
+        invented = [section for section in references if section not in allowed]
+        if invented:
+            raise ValueError(
+                "misconception and reread references must exactly match supplied tree "
+                f"sections; invalid: {invented}"
+            )
+        return self

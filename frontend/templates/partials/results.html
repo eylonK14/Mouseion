@@ -16,7 +16,7 @@
 
 {% if hits %}
   <div class="grid gap-2">
-    {% for hit in hits %}{{ paper_card(hit) }}{% endfor %}
+    {% for hit in hits %}{{ paper_card(hit, understanding_by_paper.get(hit.paper.id)) }}{% endfor %}
   </div>
 
   {% if total > query.limit %}

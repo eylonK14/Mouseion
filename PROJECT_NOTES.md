@@ -6,7 +6,8 @@ use. One section per phase, newest last.
 
 * [Phase 1 — foundation](#phase-1--foundation) (schema, ingest, bare list view)
 * [Phase 2 — search & browse UI](#phase-2--search--browse-ui)
-* [Phase 3 — grounded QA](#phase-3--grounded-qa) (current)
+* [Phase 3 — grounded QA](#phase-3--grounded-qa)
+* [Phase 4 — test mode](#phase-4--test-mode) (current)
 
 ---
 
@@ -630,3 +631,177 @@ that table; do not put examiner state in a pipe or add a parallel store.
 `LLMClient`, and use the configured structured-output validation retry. The
 still-disabled `[test:{id}]` detail-button data contract is reserved for the
 Phase 4 examiner Pipe Function.
+
+---
+
+# Phase 4 — test mode
+
+Mouseion now runs a structured explain-it-back exam for one paper. The backend
+owns a persisted EXPLAIN → PROBE → VERDICT state machine; Open WebUI is still a
+stock chat/voice surface, and the new pipe only resolves scope, carries a
+session lock, relays examiner turns, and formats the final structured verdict.
+
+## 1. What was added
+
+```
+backend/migrations/versions/0003_test_session_state.py
+backend/src/mouseion/
+  api/test_mode.py             start / reload / history / streaming turn
+  services/examiner.py         state machine, grounding, grading, persistence
+  services/prompts.py          + probe planning and verdict prompts
+  services/schemas.py          + strict probe/rubric/verdict contracts
+pipes/
+  test_me.py                   🎓 Test me Open WebUI wrapper
+  common.py                    + shared test tags/session lock/verdict renderer
+frontend/
+  templates/partials/understanding.html
+  templates/partials/paper_detail.html   enabled test handoff + panel loader
+  templates/partials/paper_card.html     latest-score status ring
+  static/app.js                         test deep link + PDF page jump
+backend/tests/test_examiner.py
+backend/tests/fixtures/examiner_prompts.golden.txt
+```
+
+Three environment-backed controls were added and are all in `.env.example`:
+`TEST_MAX_TURNS` (8), `TEST_SESSION_TTL_HOURS` (72), and
+`TEST_UNDERSTOOD_THRESHOLD` (4).
+
+## 2. Examiner and grounding decisions
+
+**The state machine is explicit and stored.** Migration `0003` adds `phase`,
+`turn_count`, `state_json`, `updated_at`, `expires_at`, and `completed_at` to
+the Phase 1 `test_sessions` table. `state_json` contains only the bounded probe
+plan, current probe index, and one-pushback flag. Transcript, rubric, overall
+score, and gaps continue to use the columns reserved in migration `0001`.
+
+**EXPLAIN is deterministic.** Starting a test validates that the paper and a
+usable stored tree exist, creates the row immediately, and returns the fixed
+opening request to explain the core idea, problem, and approach. No model call
+is spent before the owner starts explaining.
+
+**PROBE reuses Phase 3 paper grounding.** The initial explanation is passed to
+`qa.py::gather_grounding_material_for_paper`; its async tree navigation selects
+method/results/limitations evidence. Probe planning is a separate structured
+`MODEL_QA` call. The Pydantic contract requires 2–3 probes, collective coverage
+of methodology/results/limitations, and at least one marked explanation gap.
+
+**Section grounding is enforced inside the retry loop.** `LLMClient.complete_json`
+now accepts a validation context. Probe, misconception, and reread section
+labels must exactly match the actual tree-section excerpts selected for that
+call. An invented label is a Pydantic validation failure, so the normal
+configured retry receives the bad reply plus its validation error. Pipes never
+validate or repair model content.
+
+**Vagueness gets one pushback, never an answer.** A short/explicitly uncertain
+probe response receives one concrete request to answer the same question and
+name the mechanism or evidence. The response identifies the section but does
+not reveal its content. A second vague response advances to the next probe.
+
+**VERDICT is isolated from probing.** Early “I’m done”, the configured user-turn
+cap, normal probe exhaustion, and lazy session expiry all enter the same final
+structured call. The validated result has three 1–5 rubric dimensions,
+misconceptions with contradicting real sections, reread section refs, and a
+1–5 overall score plus one-line summary. `rubric_json`, `score`, `gaps_json`,
+and the final transcript are written before a stream exposes the result.
+
+**Expiry is lazy and resumable.** There is no scheduler: an overdue active
+session is finalized on its next `GET /api/test/{session_id}` or turn. Every
+active turn refreshes the expiry. If a mobile stream drops after the update,
+reloading the session id replays the persisted phase, transcript, current
+question, or verdict.
+
+## 3. API, pipe, and UI contracts
+
+- `POST /api/test/{paper_id}/start` creates a session and returns its id plus
+  opening question and initial snapshot.
+- `POST /api/test/{session_id}/turn` emits named SSE `metadata`, `token`,
+  optional structured `verdict`, `done`, and readable `error` events. Its final
+  snapshot omits transcript to keep turn payloads short.
+- `GET /api/test/{session_id}` is the replay/resume contract.
+- `GET /api/test/paper/{paper_id}/sessions` returns history for non-HTML clients.
+- The Open WebUI Function id is `test_me`. It accepts `[test:N]` (the reserved
+  detail-button contract), `[paper:N]`, or a fuzzy title resolved through the
+  same Phase 3 backend endpoint as Single Paper.
+- A hidden `mouseion-test-session:N` marker in retained assistant content keeps
+  the pipe stateless while preserving the backend session across follow-ups.
+- Open WebUI's built-in call mode works without audio code. Optional ElevenLabs
+  TTS is documented only as an Open WebUI setting; Mouseion does not integrate
+  it directly.
+- The detail page shows latest score/date, three rubric mini-bars,
+  misconception count, expandable transcript/history, and reread targets.
+  Targets with a tree page call the authenticated blob PDF viewer with
+  `#page=N`; targets without page metadata remain plain section names.
+- Library cards batch-fetch the latest completed session per visible paper and
+  add a subtle score-colored ring around the existing reading-status chip.
+- A latest score at or above `TEST_UNDERSTOOD_THRESHOLD` offers a one-click
+  status change. It is server-rechecked and never automatic.
+
+## 4. Verification and known limits
+
+- Untouched Phase 3 baseline: **222 passed**.
+- Phase 4 focused coverage includes normal transitions, two real-section
+  probes, gap targeting, early done, max turns, expiry, one-time vague
+  pushback, section-reference validation retry, persisted wrong-answer
+  misconception, shared tag/session parsing, empty/many misconception Markdown,
+  SSE verdicts, reload/history, migration columns, card rings, PDF page links,
+  opt-in status, and suppression of Open WebUI title/tag helper tasks.
+- Prompt changes were regenerated with `python -m tests.regenerate_golden` and
+  the new examiner golden was inspected. Existing ingest and QA goldens did
+  not change.
+- Complete local suite: **240 passed**, with only the existing third-party
+  Starlette/httpx deprecation and unwritable pytest-cache warnings.
+- Test-mode LLM usage is not added to `qa_log`; that table deliberately logs QA
+  requests, while persistent examiner outcomes live in `test_sessions`.
+- Expiry is request-driven rather than a background sweep. An abandoned
+  session that is never read again remains active in storage but cannot affect
+  latest-score UI, which only considers completed rows.
+
+### Live acceptance (2026-08-24)
+
+Run through the installed **🎓 Test me** Function in the stock Open WebUI
+container against real ingested paper 14, *Deep-TEMPEST: Using Deep Learning to
+Eavesdrop on HDMI from its Unintended Electromagnetic Emanations*:
+
+- Open WebUI sent the fixed explanation prompt, then three grounded probes: the
+  actual emanation/capture mechanism, measured CER/robustness, and documented
+  countermeasures. The first and third explicitly challenged claims skipped or
+  contradicted by the deliberately wrong explanation.
+- The final Markdown contained a 1/5 overall score, all three rubric rows, five
+  misconceptions, and real refs including `§3 Unintended Electromagnetic
+  Emanations of HDMI`, `§7.1 Robustness`, and `§7.2 Countermeasures`.
+- The persisted verdict appeared immediately on the authenticated paper detail
+  page with date, mini-bars, five-misconception count, session history, and
+  reread links to PDF pages 3, 8, and 9. Clicking the first produced an
+  authenticated `blob:` viewer URL ending in `#page=3`.
+- The library card exposed the latest-score ring through the accessible title
+  “Latest understanding score: 1/5”; reading status remained `to_read`.
+- Open WebUI's visible **Voice mode** and **Voice Input** controls were present
+  for the Test-me model; no Mouseion audio code or ElevenLabs call was needed.
+- The run exposed that Open WebUI may call the selected model for auxiliary
+  title/tag tasks. `common.py::is_auxiliary_request` now drops those bodies
+  before they can create or advance a session, with a regression test.
+
+## 5. Phase 5 hook points
+
+**Phone resume.** Persist a returned session id alongside any phone test route;
+`GET /api/test/{session_id}` is sufficient to restore the conversation. Do not
+cache examiner phase or probe position in a service worker—the database row is
+the authority.
+
+**PWA capture.** The share target should keep using `POST /api/papers` and hand
+the resulting job id to `Mouseion.watchJob`. Test mode requires a completed
+paper plus stored tree, so capture should link to the paper after ingest rather
+than trying to start an exam inside the share event.
+
+**Mobile PDF reread.** `Mouseion.jumpToPdf(paperId, page)` is the stable browser
+hook for reread links. A Phase 5 viewer replacement must preserve bearer-token
+fetching, blob lifetime cleanup, and page-number navigation.
+
+**Offline and retry semantics.** A dropped examiner stream may be followed by
+a session reload before resubmitting an answer. If Phase 5 adds client-generated
+turn ids for stronger retry idempotency, add a migration and enforce them in
+`services/examiner.py`; do not deduplicate conversational text heuristically.
+
+**Deployment hardening remains unchanged.** Vendor frontend assets, run
+services non-root, add backups for the SQLite/PDF/tree volume, and keep all
+three Open WebUI pipes as thin authenticated transports.

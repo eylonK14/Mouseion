@@ -1,6 +1,6 @@
 {# Reading-status control. Swaps itself (outerHTML) on change, so the little
    "saved" tick comes back from the server rather than being guessed. #}
-<div id="status-control" class="flex items-center gap-2">
+<div id="status-control" class="flex items-center gap-2"{% if oob %} hx-swap-oob="outerHTML:#status-control"{% endif %}>
   <label class="faint text-[11px] uppercase tracking-wider" for="status-select">Status</label>
   <select
     id="status-select"
