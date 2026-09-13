@@ -57,17 +57,17 @@
         </button>
         <button
           class="btn"
-          disabled
+          type="button"
+          data-open-test-chat
           data-openwebui-url="{{ openwebui_base_url }}"
           data-chat-prefix="[test:{{ paper['id'] }}]"
-          title="Phase 4 — explain this paper back and get graded"
+          title="Explain this paper back and get a grounded verdict in Open WebUI"
         >
           <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
             <path d="M8 1L2 4v5.2c0 2.6 2.5 4.6 6 5.8 3.5-1.2 6-3.2 6-5.8V4L8 1zm0 2.2l4 2v4c0 1.6-1.6 3.1-4 4.1-2.4-1-4-2.5-4-4.1v-4l4-2z" />
           </svg>
           Test me
         </button>
-        <span class="faint self-center text-[11px]">Phase 4 will enable examiner mode</span>
       </div>
     </header>
 
@@ -113,6 +113,16 @@
         {% endif %}
       </section>
     {% endif %}
+
+    <!-- persisted examiner signal and history -->
+    <div
+      id="understanding"
+      hx-get="/ui/papers/{{ paper['id'] }}/understanding"
+      hx-trigger="load, mouseion:auth from:body"
+      hx-swap="innerHTML"
+    >
+      <section class="panel p-4"><p class="faint text-xs">Loading understanding…</p></section>
+    </div>
 
     <!-- direct, no-context-switch QA while reading -->
     <section class="panel p-4">
@@ -160,7 +170,7 @@
   </div>
 
   <!-- ----------------------------------------------------------- right col -->
-  <aside class="panel overflow-hidden lg:sticky lg:top-[57px]">
+  <aside id="pdf-viewer" class="panel overflow-hidden lg:sticky lg:top-[57px]">
     <div class="flex items-center justify-between border-b border-neutral-800 px-3 py-2">
       <h2 class="faint text-[11px] font-medium uppercase tracking-wider">PDF</h2>
       <span id="pdf-status" class="faint text-[11px]"></span>

@@ -516,11 +516,11 @@ def test_taxonomy_json_split_and_delete(
 
 
 def test_paper_fragment_shows_the_phase_3_and_4_seams(client: TestClient, paper: int) -> None:
-    """Phase 3 enables paper QA while preserving Phase 4's disabled seam."""
+    """Both Open WebUI handoffs preserve their scope-tag contracts."""
     text = client.get(f"/ui/papers/{paper}", headers=AUTH).text
     assert f'data-chat-prefix="[paper:{paper}]"' in text
     assert f'data-chat-prefix="[test:{paper}]"' in text
     assert 'data-openwebui-url="http://localhost:3000"' in text
     assert "data-open-paper-chat" in text
+    assert "data-open-test-chat" in text
     assert "data-quick-qa-form" in text
-    assert text.count("disabled") >= 1

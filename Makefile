@@ -1,4 +1,4 @@
-# Mouseion — Phases 1-3
+# Mouseion — Phases 1-4
 #
 # Recipes use a leading TAB (GNU make). If you are on Windows without make,
 # every target's body is a plain docker compose / pytest command you can paste;
@@ -23,7 +23,7 @@ up: env ## Build if needed, run migrations, start the stack
 	@echo "library:  http://localhost:$${API_PORT:-8000}/"
 	@echo "taxonomy: http://localhost:$${API_PORT:-8000}/taxonomy"
 
-webui: env ## Start the optional Open WebUI paper-QA chat surface
+webui: env ## Start the optional Open WebUI QA and test-mode chat surface
 	$(COMPOSE) --profile webui up -d open-webui
 	@echo "open webui: http://localhost:$${WEBUI_PORT:-3000}"
 

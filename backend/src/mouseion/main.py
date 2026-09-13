@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from mouseion import __version__
-from mouseion.api import health, jobs, notes, papers, qa, search, topics, ui
+from mouseion.api import health, jobs, notes, papers, qa, search, test_mode, topics, ui
 from mouseion.auth import BearerAuthMiddleware
 from mouseion.config import get_settings
 from mouseion.services import queue
@@ -47,6 +47,7 @@ def create_app() -> FastAPI:
     app.include_router(notes.router)
     app.include_router(search.router)
     app.include_router(qa.router)
+    app.include_router(test_mode.router)
     app.include_router(topics.router)
     app.include_router(jobs.router)
 

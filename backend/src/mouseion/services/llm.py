@@ -297,6 +297,7 @@ class LLMClient:
         output_model: type[T],
         max_attempts: int | None = None,
         metrics: LLMMetrics | None = None,
+        validation_context: dict[str, Any] | None = None,
     ) -> T:
         """Call the model and validate its JSON into `output_model`.
 
@@ -330,7 +331,9 @@ class LLMClient:
                 metrics.add(response.metrics)
             content = response.content
             try:
-                return output_model.model_validate_json(content)
+                return output_model.model_validate_json(
+                    content, context=validation_context
+                )
             except ValidationError as exc:
                 last_error = exc
                 log.warning(

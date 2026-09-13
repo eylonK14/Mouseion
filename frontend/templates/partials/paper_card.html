@@ -16,14 +16,16 @@
   <mark> around the matches; that is the only reason it is rendered `| safe`.
 #}
 
-{% macro status_badge(status) -%}
+{% macro status_badge(status, understanding=none) -%}
+{% set understanding_score = understanding.verdict.overall.score if understanding and understanding.verdict else none %}
 <span
-  class="chip ring-1 ring-inset {{ STATUS_CLASSES.get(status, STATUS_CLASSES['to_read']) }}"
+  class="chip ring-1 ring-inset {{ STATUS_CLASSES.get(status, STATUS_CLASSES['to_read']) }}{% if understanding_score %} understanding-ring understanding-score-{{ understanding_score }}{% endif %}"
+  {% if understanding_score %}title="Latest understanding score: {{ understanding_score }}/5"{% endif %}
   >{{ STATUS_LABELS.get(status, status) }}</span
 >
 {%- endmacro %}
 
-{% macro paper_card(hit, show_score=false) -%}
+{% macro paper_card(hit, understanding=none, show_score=false) -%}
 {% set paper = hit.paper %}
 <article
   class="panel p-3 sm:p-4 hover:border-neutral-700 transition-colors"
@@ -49,7 +51,7 @@
     </div>
 
     <div class="flex flex-none flex-col items-end gap-1">
-      {{ status_badge(paper.status) }}
+      {{ status_badge(paper.status, understanding) }}
       {% if show_score and hit.score is not none %}
         <span class="faint text-[10px] tabular-nums" title="Retrieval score, higher is better"
           >{{ "%.2f" | format(hit.score) }}</span

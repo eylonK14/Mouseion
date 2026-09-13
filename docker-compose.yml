@@ -30,6 +30,9 @@ x-backend: &backend
   volumes:
     - ./data:/app/data
     - ./frontend:/app/frontend:ro
+    # The API does not execute pipe code, but its test suite verifies the
+    # shared Open WebUI transport helpers against the checked-out source.
+    - ./pipes:/app/pipes:ro
     - hf-cache:/app/.hf-cache
 
 services:

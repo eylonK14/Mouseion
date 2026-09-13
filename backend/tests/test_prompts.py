@@ -12,11 +12,14 @@ from pathlib import Path
 
 from mouseion.services.prompts import (
     EMPTY_TAXONOMY,
+    EXAMINER_PROMPT_VERSION,
     PROMPT_VERSION,
     GroundingExcerpt,
     QA_PROMPT_VERSION,
     bound_paper_text,
     build_grounding_prompt,
+    build_exam_probe_prompt,
+    build_exam_verdict_prompt,
     build_ingest_prompt,
     extract_section_headers,
     render_taxonomy_tree,
@@ -26,6 +29,7 @@ from mouseion.services.taxonomy import TopicRow
 FIXTURES = Path(__file__).parent / "fixtures"
 GOLDEN = FIXTURES / "ingest_prompt.golden.txt"
 QA_GOLDEN = FIXTURES / "grounding_prompt.golden.txt"
+EXAMINER_GOLDEN = FIXTURES / "examiner_prompts.golden.txt"
 
 TAXONOMY = [
     TopicRow(id=1, name="Machine Learning", parent_id=None),
@@ -79,6 +83,41 @@ def build_qa_golden_prompt() -> str:
     return f"{prompt.system}\n===== USER =====\n{prompt.user}"
 
 
+def build_examiner_golden_prompt() -> str:
+    excerpts = [
+        GroundingExcerpt(
+            paper_id=7,
+            paper_title="A Tiny Paper About Attention",
+            section="2 Method",
+            text="Scaled dot-product attention maps queries and keys to weighted values.",
+        ),
+        GroundingExcerpt(
+            paper_id=7,
+            paper_title="A Tiny Paper About Attention",
+            section="3 Results",
+            text="The model improves the toy task but is not tested at production scale.",
+        ),
+    ]
+    probe = build_exam_probe_prompt(
+        paper_title="A Tiny Paper About Attention",
+        explanation="It uses attention and performs well.",
+        excerpts=excerpts,
+    )
+    verdict = build_exam_verdict_prompt(
+        paper_title="A Tiny Paper About Attention",
+        transcript=[
+            {"role": "assistant", "kind": "opening", "content": "Explain the core idea."},
+            {"role": "user", "kind": "answer", "content": "It uses attention."},
+        ],
+        excerpts=excerpts,
+    )
+    return (
+        f"{probe.system}\n===== PROBE USER =====\n{probe.user}\n"
+        f"===== VERDICT SYSTEM =====\n{verdict.system}\n"
+        f"===== VERDICT USER =====\n{verdict.user}"
+    )
+
+
 def test_prompt_matches_golden_file() -> None:
     assert GOLDEN.exists(), "golden file missing — run tests/regenerate_golden.py"
     assert build_golden_prompt() == GOLDEN.read_text(encoding="utf-8")
@@ -88,6 +127,15 @@ def test_grounding_prompt_matches_golden_file() -> None:
     assert QA_GOLDEN.exists(), "golden file missing — run tests/regenerate_golden.py"
     assert build_qa_golden_prompt() == QA_GOLDEN.read_text(encoding="utf-8")
     assert QA_PROMPT_VERSION in build_qa_golden_prompt()
+
+
+def test_examiner_prompts_match_golden_file() -> None:
+    assert EXAMINER_GOLDEN.exists(), "golden file missing — run tests/regenerate_golden.py"
+    rendered = build_examiner_golden_prompt()
+    assert rendered == EXAMINER_GOLDEN.read_text(encoding="utf-8")
+    assert EXAMINER_PROMPT_VERSION in rendered
+    assert "never reveal" in rendered
+    assert "exact supplied section labels" in rendered
 
 
 def test_prompt_contains_the_rendered_taxonomy_tree() -> None:

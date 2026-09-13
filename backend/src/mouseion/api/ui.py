@@ -31,6 +31,11 @@ from mouseion.config import Settings, get_settings
 from mouseion.db import get_db
 from mouseion.services import notes as notes_repo
 from mouseion.services import papers as papers_repo
+from mouseion.services.examiner import (
+    latest_completed_by_papers,
+    list_sessions as list_test_sessions,
+    session_payload as test_session_payload,
+)
 from mouseion.services.search import SORT_KEYS, search_papers
 from mouseion.services.taxonomy import (
     TopicError,
@@ -164,11 +169,15 @@ def results_fragment(
     """Result cards + pagination. The library view's only data request."""
     query = build_query(q, topic_id, status_filter, year_from, year_to, sort, limit, offset)
     result = search_papers(conn, query)
+    hits = to_hits(conn, result)
     return render(
         request,
         "partials/results.html",
         {
-            "hits": to_hits(conn, result),
+            "hits": hits,
+            "understanding_by_paper": latest_completed_by_papers(
+                conn, [hit.paper.id for hit in hits]
+            ),
             "total": result.total,
             "query": query,
             "topic": get_topic(conn, topic_id) if topic_id is not None else None,
@@ -214,6 +223,65 @@ def paper_fragment(
             "n_pages": text["n_pages"] if text else None,
             "openwebui_base_url": settings.openwebui_base_url,
         },
+    )
+
+
+def _understanding(
+    request: Request,
+    conn: sqlite3.Connection,
+    paper_id: int,
+    *,
+    settings: Settings,
+    status_updated: bool = False,
+) -> HTMLResponse:
+    paper = _require_paper(conn, paper_id)
+    sessions = list_test_sessions(conn, paper_id)
+    payloads = [test_session_payload(conn, session, settings=settings) for session in sessions]
+    latest = next((item for item in payloads if item["verdict"] is not None), None)
+    return render(
+        request,
+        "partials/understanding.html",
+        {
+            "paper": paper,
+            "sessions": payloads,
+            "latest": latest,
+            "understood_threshold": settings.test_understood_threshold,
+            "status_updated": status_updated,
+        },
+    )
+
+
+@ui.get("/papers/{paper_id}/understanding", response_class=HTMLResponse)
+def understanding_fragment(
+    request: Request,
+    paper_id: int,
+    conn: sqlite3.Connection = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> HTMLResponse:
+    return _understanding(request, conn, paper_id, settings=settings)
+
+
+@ui.post("/papers/{paper_id}/understanding/accept", response_class=HTMLResponse)
+def understanding_accept(
+    request: Request,
+    paper_id: int,
+    conn: sqlite3.Connection = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> HTMLResponse:
+    _require_paper(conn, paper_id)
+    latest = latest_completed_by_papers(conn, [paper_id]).get(paper_id)
+    if (
+        latest is None
+        or latest.verdict is None
+        or latest.verdict.overall.score < settings.test_understood_threshold
+    ):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"latest test score is below the understood threshold ({settings.test_understood_threshold})",
+        )
+    papers_repo.update_paper(conn, paper_id, status="understood")
+    return _understanding(
+        request, conn, paper_id, settings=settings, status_updated=True
     )
 
 

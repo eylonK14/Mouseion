@@ -162,8 +162,18 @@ def test_fuzzy_title_resolution_locks_only_one_clear_hit(conn: sqlite3.Connectio
     assert resolution.locked.id == expected
 
 
+def _repository_asset(*parts: str) -> Path:
+    """Locate a repository asset in a checkout or the Compose API container."""
+    backend_root = Path(__file__).resolve().parents[1]
+    for root in (backend_root.parent, backend_root):
+        candidate = root.joinpath(*parts)
+        if candidate.exists():
+            return candidate
+    return backend_root.parent.joinpath(*parts)
+
+
 def _load_pipe_common():  # noqa: ANN202
-    path = Path(__file__).resolve().parents[2] / "pipes" / "common.py"
+    path = _repository_asset("pipes", "common.py")
     spec = importlib.util.spec_from_file_location("mouseion_test_pipe_common", path)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
@@ -261,9 +271,9 @@ async def test_pipe_tag_only_lock_is_not_forwarded_as_empty_history() -> None:
 
 
 def test_paper_chat_deep_link_has_no_built_in_question() -> None:
-    source = (
-        Path(__file__).resolve().parents[2] / "frontend" / "static" / "app.js"
-    ).read_text(encoding="utf-8")
+    source = _repository_asset("frontend", "static", "app.js").read_text(
+        encoding="utf-8"
+    )
 
     assert 'url.searchParams.set("q", button.dataset.chatPrefix);' in source
     assert "What's the main contribution?" not in source

@@ -12,18 +12,19 @@ about it, and be examined on it.
 
 ## Status
 
-Phases 1-2 of 5 are done. Ingest works end to end, and the library is a usable
-tool on its own: full-text search with highlighted snippets, a topic tree that
-filters by descendants, a paper detail page with reading status and markdown
-  notes, and a taxonomy editor with create / rename / re-parent / split / merge /
-  delete. QA (Phase 3) and
-test mode (Phase 4) are not wired yet.
+Phases 1-4 of 5 are done. Ingest works end to end, and the library supports
+full-text and semantic search, descendant-aware topic browsing, grounded QA
+over one paper or the collection, and persisted examiner sessions with rubric
+scores, misconceptions, and sections to reread. Open WebUI provides the QA and
+voice-ready test-mode chat surfaces. Phase 5 will focus on phone/PWA capture and
+deployment hardening.
 
 ## Quickstart
 
 ```bash
 cp .env.example .env    # set API_TOKEN and OPENROUTER_API_KEY
 make up                 # library at http://localhost:8000/
+make webui              # optional QA/test chat at http://localhost:3000/
 ```
 
 ```bash

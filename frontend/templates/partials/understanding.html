@@ -1,0 +1,138 @@
+<section class="panel p-4">
+  <div class="flex flex-wrap items-start justify-between gap-3">
+    <div>
+      <h2 class="faint text-[11px] font-medium uppercase tracking-wider">Understanding</h2>
+      {% if latest %}
+        <div class="mt-1 flex items-baseline gap-2">
+          <span class="text-2xl font-semibold tabular-nums">{{ latest.verdict.overall.score }}/5</span>
+          <span class="muted text-xs">{{ (latest.completed_at or latest.created_at)[:10] }}</span>
+        </div>
+        <p class="muted mt-1 text-[13px]">{{ latest.verdict.overall.summary }}</p>
+      {% else %}
+        <p class="muted mt-1 text-[13px]">No completed test yet.</p>
+      {% endif %}
+    </div>
+
+    {% if latest and latest.verdict.overall.score >= understood_threshold and paper["status"] != "understood" %}
+      <div data-understood-offer>
+        <button
+          class="btn btn-primary"
+          hx-post="/ui/papers/{{ paper['id'] }}/understanding/accept"
+          hx-target="#understanding"
+          hx-swap="innerHTML"
+          title="This changes reading status only; scores never change it automatically"
+        >
+          Mark understood
+        </button>
+        <p class="faint mt-1 max-w-48 text-[10px]">Offered at {{ understood_threshold }}/5; never automatic.</p>
+      </div>
+    {% endif %}
+  </div>
+
+  {% if latest %}
+    <div class="mt-3 grid gap-2 sm:grid-cols-3">
+      {% for label, key in [
+        ("Problem", "problem_understanding"),
+        ("Method", "method_understanding"),
+        ("Results & limits", "results_and_limitations")
+      ] %}
+        {% set dimension = latest.verdict.rubric[key] %}
+        <div class="rounded-lg border border-neutral-800 p-2">
+          <div class="flex justify-between gap-2 text-[11px]">
+            <span class="muted">{{ label }}</span>
+            <span class="tabular-nums">{{ dimension.score }}/5</span>
+          </div>
+          <div class="mt-1 grid grid-cols-5 gap-1" aria-label="{{ label }} score {{ dimension.score }} out of 5">
+            {% for point in range(1, 6) %}
+              <span class="h-1 rounded-full {{ 'bg-emerald-400' if point <= dimension.score else 'bg-neutral-800' }}"></span>
+            {% endfor %}
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+
+    <div class="mt-3 flex flex-wrap gap-2 text-xs">
+      <span class="chip">{{ latest.verdict.misconceptions | length }} misconception{{ '' if latest.verdict.misconceptions | length == 1 else 's' }}</span>
+      {% if latest.reread_targets %}<span class="chip">{{ latest.reread_targets | length }} section{{ '' if latest.reread_targets | length == 1 else 's' }} to reread</span>{% endif %}
+    </div>
+
+    {% if latest.reread_targets %}
+      <div class="mt-3">
+        <h3 class="faint text-[11px] font-medium uppercase tracking-wider">Sections to reread</h3>
+        <ul class="mt-1 space-y-1 text-[13px]">
+          {% for target in latest.reread_targets %}
+            <li>
+              {% if target.start_page %}
+                <a
+                  class="text-sky-300 hover:underline"
+                  href="#pdf-viewer"
+                  data-pdf-page="{{ target.start_page }}"
+                  data-paper-id="{{ paper['id'] }}"
+                >{{ target.section }} · page {{ target.start_page }}</a>
+              {% else %}
+                <span class="muted">{{ target.section }}</span>
+              {% endif %}
+            </li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+  {% endif %}
+
+  {% if sessions %}
+    <details class="mt-4 border-t border-neutral-800 pt-3">
+      <summary class="cursor-pointer text-xs text-neutral-300">
+        Session history ({{ sessions | length }})
+      </summary>
+      <div class="mt-2 space-y-2">
+        {% for session in sessions %}
+          <details class="rounded-lg border border-neutral-800 p-2.5">
+            <summary class="cursor-pointer text-xs">
+              {{ session.created_at[:10] }} ·
+              {% if session.verdict %}{{ session.verdict.overall.score }}/5{% else %}{{ session.phase | upper }}{% endif %}
+            </summary>
+            {% if session.verdict %}
+              <div class="mt-2 grid gap-2 text-[12px]">
+                {% for label, key in [
+                  ("Problem", "problem_understanding"),
+                  ("Method", "method_understanding"),
+                  ("Results & limitations", "results_and_limitations")
+                ] %}
+                  <p><span class="text-neutral-200">{{ label }} {{ session.verdict.rubric[key].score }}/5:</span> <span class="muted">{{ session.verdict.rubric[key].justification }}</span></p>
+                {% endfor %}
+                {% if session.verdict.misconceptions %}
+                  <div>
+                    <p class="text-neutral-200">Misconceptions</p>
+                    <ul class="muted mt-1 list-disc space-y-1 pl-5">
+                      {% for item in session.verdict.misconceptions %}
+                        <li><span class="text-neutral-300">{{ item.what_user_said }}</span> — {{ item.what_paper_says }} <span class="faint">(§{{ item.section }})</span></li>
+                      {% endfor %}
+                    </ul>
+                  </div>
+                {% else %}
+                  <p class="muted">No specific misconceptions recorded.</p>
+                {% endif %}
+              </div>
+            {% else %}
+              <p class="muted mt-2 text-[12px]">Current question: {{ session.current_question }}</p>
+            {% endif %}
+            <details class="mt-2">
+              <summary class="faint cursor-pointer text-[11px]">Transcript</summary>
+              <ol class="mt-1 space-y-1 text-[12px]">
+                {% for turn in session.transcript %}
+                  <li><span class="faint uppercase">{{ turn.role }}</span> {{ turn.content }}</li>
+                {% endfor %}
+              </ol>
+            </details>
+          </details>
+        {% endfor %}
+      </div>
+    </details>
+  {% endif %}
+
+  {% if status_updated %}
+    {% with paper_id = paper["id"], status = "understood", saved = true, oob = true %}
+      {% include "partials/status_control.html" %}
+    {% endwith %}
+  {% endif %}
+</section>

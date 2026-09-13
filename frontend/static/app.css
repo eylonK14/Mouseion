@@ -140,6 +140,27 @@ a {
   background: #274056;
 }
 
+/* Latest examiner score: a second, deliberately subtle ring around the
+   reading-status chip. The status itself never changes automatically. */
+.understanding-ring {
+  box-shadow: 0 0 0 2px var(--canvas), 0 0 0 4px var(--understanding-color);
+}
+.understanding-score-1 {
+  --understanding-color: #f87171;
+}
+.understanding-score-2 {
+  --understanding-color: #fb923c;
+}
+.understanding-score-3 {
+  --understanding-color: #facc15;
+}
+.understanding-score-4 {
+  --understanding-color: #4ade80;
+}
+.understanding-score-5 {
+  --understanding-color: #2dd4bf;
+}
+
 .muted {
   color: var(--muted);
 }
